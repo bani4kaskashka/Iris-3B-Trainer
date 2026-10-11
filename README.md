@@ -36,7 +36,7 @@ python merge_lora.py runs/my_lora/lora_010000.safetensors --name my_model
 4. **train_lora.py** trains the LoRA. Rank 64 by default on the transformer blocks, pixel head and final layer (112M params), AdamW with warmup and cosine decay, 10% caption dropout so CFG keeps working, gradient checkpointing, and a preview sheet and save every 500 steps. `--resume` continues from the last save.
 5. **merge_lora.py** folds a LoRA into the base weights and writes `iris-3b-<name>.safetensors` (bf16, 6 GB) into your models folder.
 
-Useful options: `--rank`, `--lr` (1e-4), `--batch` / `--accum`, `--steps`, `--checkpointing` (`full` saves the most memory), `--flip` (only if your images have no text).
+Useful options: `--rank` (128 is a good default for big datasets, 64 for small ones), `--lr` (1e-4 at rank 64, 8e-5 at 128), `--init-lora` (start from a finished LoRA with a fresh schedule, to keep training it on more or new images), `--batch` / `--accum`, `--steps`, `--checkpointing` (`full` saves the most memory), `--flip` (only if your images have no text).
 
 ## Dashboard
 
@@ -44,14 +44,14 @@ Useful options: `--rank`, `--lr` (1e-4), `--batch` / `--accum`, `--steps`, `--ch
 python dashboard.py --data D:\Iris-data
 ```
 
-Opens on http://127.0.0.1:7861 (local only). It shows the progress of every step with ETAs, starts and stops each job with its settings, follows the logs, charts the training loss with the preview images, and has a dataset browser where you can read captions and exclude images from training (thumbnails are blurred until you untick it). Jobs keep running if you close the page, and a restarted dashboard picks them back up. Only one GPU job runs at a time.
+Opens on http://127.0.0.1:7861 (local only). It shows the progress of every step with ETAs, starts and stops each job with its settings, follows the logs, charts the training loss with the preview images, and has a dataset browser where you can read captions and exclude images from training: full-size viewer, arrow keys to move, X to exclude (thumbnails are blurred until you untick it). Jobs run detached: they keep going if you close the page or restart the dashboard, and it picks them back up. Only one GPU job runs at a time.
 
 Everything it does goes through a small JSON API (`/api/status`, `/api/jobs/start`, `/api/jobs/stop`, `/api/log`, `/api/dataset`, `/api/exclude`, `/api/runs`), so you can script it too.
 
 ## Danbooru metadata tools
 
 - **analyze_meta.py** counts what a Danbooru `posts.json` would give after each filter.
-- **fetch_filtered.py** streams the tar batches of a Danbooru-derived Hugging Face dataset and saves only the allowed images, each with a json sidecar of its tags. Rejected files are never written to disk, and a dropped connection resumes where it left off.
+- **fetch_filtered.py** takes any Hugging Face dataset link (`--repo`) with danbooru-style tar batches and a posts metadata file (`--meta-file`). It finds the tars and their sizes itself and streams them, and saves only the allowed images, each with a json sidecar of its tags. Rejected files are never written to disk, and a dropped connection resumes where it left off.
 - **convert_comfy_vlm.py** turns a ComfyUI single-file Qwen3-VL (fp8_scaled, with its vision tower) back into a Hugging Face folder that `caption.py` can use.
 
 ## Content rule

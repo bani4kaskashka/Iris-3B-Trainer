@@ -98,7 +98,8 @@
 </main>
 
 <div class="modal" id="modal"><div class="box"><img id="mImg" alt=""><div class="side">
-  <div class="row" style="justify-content:space-between"><b>Image</b><button class="ghost" id="mClose">Close</button></div>
+  <div class="row" style="justify-content:space-between"><span class="row"><button class="ghost" id="mPrev">&larr;</button><b id="mPos"></b><button class="ghost" id="mNext">&rarr;</button></span><button class="ghost" id="mClose">Close</button></div>
+  <p class="muted" style="font-size:11px">Arrow keys move, X excludes, Esc closes.</p>
   <p class="muted" id="mPath" style="word-break:break-all;font-size:11px"></p>
   <button class="act" id="mEx"></button>
   <h4>Caption</h4><p id="mCap"></p>
@@ -152,8 +153,8 @@ function renderStages(s) {
     $("#b-" + j).style.width = (info.pct ?? 0) + "%";
     $("#t-" + j).textContent = info.text;
     const pill = $("#p-" + j);
-    pill.textContent = running ? "running" : last ? (last.exit === 0 ? "finished" : `exit ${last.exit}`) : "idle";
-    pill.className = "pill" + (running ? " run" : last && last.exit ? " err" : "");
+    pill.textContent = running ? "running" : last ? (last.exit === 0 ? "finished" : last.exit === -1 ? "stopped" : "failed") : "idle";
+    pill.className = "pill" + (running ? " run" : last && last.exit > 0 ? " err" : "");
     const go = $("#go-" + j);
     go.textContent = running ? "Stop" : "Start";
     go.className = "act" + (running ? " stop" : "");
@@ -187,31 +188,59 @@ async function loadLog() {
 $("#logJob").onchange = loadLog;
 
 // ---- dataset
-let dsOffset = 0; const LIMIT = 60;
+let dsOffset = 0, dsRows = [], dsTotal = 0, cur = -1; const LIMIT = 60;
 async function loadDataset() {
   const r = await api(`/api/dataset?offset=${dsOffset}&limit=${LIMIT}&q=${encodeURIComponent($("#q").value)}&excluded=${$("#onlyEx").checked ? 1 : 0}`);
+  dsRows = r.rows; dsTotal = r.total;
   $("#dsInfo").textContent = `${fmt(r.total)} images (${r.source})`;
   $("#page").textContent = r.total ? `${dsOffset + 1}-${Math.min(dsOffset + LIMIT, r.total)}` : "";
   $("#gallery").innerHTML = r.rows.map((x, i) => `<div class="tile ${x.excluded ? "ex" : ""}" data-i="${i}"><img loading="lazy" src="/thumb?path=${encodeURIComponent(x.path)}" alt=""><div class="cap">${(x.caption || x.tags.join(", ")).replace(/</g, "&lt;")}</div></div>`).join("");
-  $("#gallery").querySelectorAll(".tile").forEach(t => t.onclick = () => openModal(r.rows[t.dataset.i], t));
+  $("#gallery").querySelectorAll(".tile").forEach(t => t.onclick = () => show(Number(t.dataset.i)));
+  return r;
 }
 $("#q").onchange = () => { dsOffset = 0; loadDataset(); };
 $("#onlyEx").onchange = () => { dsOffset = 0; loadDataset(); };
 $("#prev").onclick = () => { dsOffset = Math.max(0, dsOffset - LIMIT); loadDataset(); };
-$("#next").onclick = () => { dsOffset += LIMIT; loadDataset(); };
-function openModal(x, tile) {
-  $("#mImg").src = `/thumb?path=${encodeURIComponent(x.path)}`;
-  $("#mPath").textContent = x.path;
+$("#next").onclick = () => { if (dsOffset + LIMIT < dsTotal) { dsOffset += LIMIT; loadDataset(); } };
+function show(i) {
+  cur = i;
+  const x = dsRows[i];
+  $("#mImg").src = `/image?path=${encodeURIComponent(x.path)}`;
+  $("#mPos").textContent = `${fmt(dsOffset + i + 1)} / ${fmt(dsTotal)}`;
+  $("#mPath").textContent = `${x.path}  (${x.size?.[0]}x${x.size?.[1]})`;
   $("#mCap").textContent = x.caption || "(no caption yet)";
   $("#mTags").textContent = x.tags.join(", ");
   const btn = $("#mEx");
-  const draw = () => { btn.textContent = x.excluded ? "Include again" : "Exclude from training"; btn.className = "act" + (x.excluded ? "" : " stop"); };
-  draw();
-  btn.onclick = async () => { x.excluded = !x.excluded; await api("/api/exclude", {path: x.path, excluded: x.excluded}); tile.classList.toggle("ex", x.excluded); draw(); };
+  btn.textContent = x.excluded ? "Include again (X)" : "Exclude from training (X)";
+  btn.className = "act" + (x.excluded ? "" : " stop");
+  btn.onclick = toggleEx;
   $("#modal").classList.add("on");
 }
-$("#mClose").onclick = () => $("#modal").classList.remove("on");
-$("#modal").onclick = e => { if (e.target.id === "modal") $("#modal").classList.remove("on"); };
+async function toggleEx() {
+  const x = dsRows[cur];
+  x.excluded = !x.excluded;
+  await api("/api/exclude", {path: x.path, excluded: x.excluded});
+  $("#gallery").querySelector(`[data-i="${cur}"]`)?.classList.toggle("ex", x.excluded);
+  show(cur);
+}
+async function step(d) {
+  let i = cur + d;
+  if (i >= dsRows.length && dsOffset + LIMIT < dsTotal) { dsOffset += LIMIT; await loadDataset(); i = 0; }
+  else if (i < 0 && dsOffset > 0) { dsOffset = Math.max(0, dsOffset - LIMIT); await loadDataset(); i = dsRows.length - 1; }
+  if (i >= 0 && i < dsRows.length) show(i);
+}
+const closeModal = () => $("#modal").classList.remove("on");
+$("#mPrev").onclick = () => step(-1);
+$("#mNext").onclick = () => step(1);
+$("#mClose").onclick = closeModal;
+$("#modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+document.addEventListener("keydown", e => {
+  if (!$("#modal").classList.contains("on") || e.target.tagName === "INPUT") return;
+  if (e.key === "ArrowRight") step(1);
+  else if (e.key === "ArrowLeft") step(-1);
+  else if (e.key === "Escape") closeModal();
+  else if (e.key.toLowerCase() === "x") toggleEx();
+});
 
 // ---- training
 let RUNS = [];

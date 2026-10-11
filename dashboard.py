@@ -13,7 +13,8 @@ can drive it too:
     GET  /api/dataset?offset=0&limit=60&q=text
     POST /api/exclude     {"path": "...", "excluded": true}
     GET  /api/runs        training runs with loss history and previews
-It binds to 127.0.0.1 only. One GPU job runs at a time.
+It binds to 127.0.0.1 only. One GPU job runs at a time. Jobs run detached: closing
+or restarting the dashboard never stops them, and a new dashboard picks them up.
 """
 
 import argparse
@@ -21,7 +22,6 @@ import json
 import mimetypes
 import os
 import re
-import signal
 import subprocess
 import sys
 import threading
@@ -31,8 +31,23 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
-TAR_SIZES = {0: 9180825600, 1: 9357946880, 2: 9113333760, 3: 9180385280}
 GPU_JOBS = {"caption", "encode", "train", "merge"}
+# starts a job with no parent attached (and outside the caller's job object when allowed),
+# prints its pid and exits, so nothing that kills the dashboard's process tree reaches the job
+LAUNCHER = r"""
+import json, subprocess, sys
+a = json.loads(sys.argv[1])
+log = open(a["log"], "a", encoding="utf-8")
+base = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+for flags in (base | 0x01000000, base):  # try CREATE_BREAKAWAY_FROM_JOB first
+    try:
+        p = subprocess.Popen(a["cmd"], cwd=a["cwd"], env=a["env"], stdout=log, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, creationflags=flags)
+        break
+    except OSError:
+        continue
+print(p.pid, flush=True)
+"""
 
 
 def comfy_scripts() -> str:
@@ -59,17 +74,18 @@ class Paths:
 def job_defs(P: Paths) -> dict:
     """name -> (description, default params). Params map to script flags in build_cmd()."""
     return {
-        "fetch": ("Download: stream the filtered images from Hugging Face",
-                  {"meta": str(HERE / "data" / "meta" / "posts.json"), "out": str(P.images), "min_score": 30, "tars": "0,1,2,3"}),
+        "fetch": ("Download: stream the filtered images from a Hugging Face dataset (any danbooru-style tar dataset)",
+                  {"repo": "https://huggingface.co/datasets/AbdullahRian/Uncensored_Anime_Images",
+                   "meta_file": "metadata/posts.json", "out": str(P.images), "min_score": 30, "tars": "all"}),
         "prep": ("Prep: tags, minors filter, size check, duplicates, buckets",
                  {"images": str(P.images), "out": str(P.manifest), "min_side": 832, "scale": 1.0}),
-        "caption": ("Captions: natural-language captions with the VLM (resumable)",
+        "caption": ("Captions: natural-language captions with the VLM, plus tags (resumable)",
                     {"manifest": str(P.manifest), "out": str(P.captions), "vlm": str(P.vlm), "max_side": 768}),
         "encode": ("Text cache: run Iris's text encoder over every caption",
                    {"captions": str(P.captions), "cache": str(P.cache)}),
-        "train": ("Train the LoRA (resumable)",
-                  {"name": "anime", "steps": 10000, "rank": 64, "lr": 0.0001, "batch": 1, "accum": 1,
-                   "save_every": 500, "preview_every": 500, "resume": True}),
+        "train": ("Train the LoRA (resume continues a run; init_lora starts from a finished LoRA)",
+                  {"name": "anime", "steps": 10000, "rank": 128, "lr": 0.00008, "batch": 1, "accum": 1,
+                   "save_every": 500, "preview_every": 500, "resume": True, "init_lora": ""}),
         "merge": ("Merge a LoRA into a full checkpoint for ComfyUI",
                   {"lora": "", "name": "anime", "strength": 1.0}),
     }
@@ -80,8 +96,8 @@ def build_cmd(job: str, p: dict, P: Paths) -> list[str]:
     if not Path(py).exists():
         py = sys.executable
     if job == "fetch":
-        return [py, "-u", "fetch_filtered.py", "--meta", p["meta"], "--out", p["out"], "--min-score", str(p["min_score"]),
-                "--tars", str(p["tars"])]
+        return [py, "-u", "fetch_filtered.py", "--repo", p["repo"], "--meta-file", p["meta_file"], "--out", p["out"],
+                "--min-score", str(p["min_score"]), "--tars", str(p["tars"])]
     if job == "prep":
         return [py, "-u", "prep_dataset.py", "--images", p["images"], "--out", p["out"], "--require-tags",
                 "--min-side", str(p["min_side"]), "--scale", str(p["scale"])]
@@ -98,19 +114,23 @@ def build_cmd(job: str, p: dict, P: Paths) -> list[str]:
                "--steps", str(p["steps"]), "--rank", str(p["rank"]), "--lr", str(p["lr"]), "--batch", str(p["batch"]),
                "--accum", str(p["accum"]), "--save-every", str(p["save_every"]), "--preview-every", str(p["preview_every"]),
                "--exclude", str(P.excluded)]
+        if p.get("init_lora"):
+            cmd += ["--init-lora", p["init_lora"]]
         return cmd + (["--resume"] if p.get("resume") else [])
     if job == "merge":
         return [py, "-u", "merge_lora.py", p["lora"], "--name", p["name"], "--strength", str(p["strength"])]
     raise ValueError(f"unknown job {job}")
 
 
-class Adopted:
-    """A job process started by an earlier dashboard instance."""
+class Proc:
+    """A detached job process, tracked by pid (survives dashboard restarts)."""
 
-    def __init__(self, pid: int):
-        self.pid, self.returncode = pid, None
+    def __init__(self, pid: int, log: Path):
+        self.pid, self.log, self.returncode = pid, log, None
 
     def poll(self):
+        if self.returncode is not None:
+            return self.returncode
         import psutil
 
         try:
@@ -118,7 +138,14 @@ class Adopted:
                 return None
         except psutil.Error:
             pass
-        self.returncode = self.returncode if self.returncode is not None else -1
+        lines = tail(self.log, 25).splitlines()
+        last_run = "\n".join(lines[max((i for i, l in enumerate(lines) if l.startswith("=== ")), default=0):])
+        if lines and "stopped from the dashboard" in lines[-1]:
+            self.returncode = -1
+        elif "Traceback" in last_run:
+            self.returncode = 1
+        else:
+            self.returncode = 0
         return self.returncode
 
 
@@ -126,9 +153,9 @@ class Jobs:
     def __init__(self, P: Paths):
         self.P, self.procs, self.meta, self.lock = P, {}, {}, threading.Lock()
         self.state = P.logs / "jobs.json"
-        if self.state.exists():  # re-adopt jobs that are still running
+        if self.state.exists():  # pick up jobs that are still running
             for name, m in json.loads(self.state.read_text()).items():
-                proc = Adopted(m["pid"])
+                proc = Proc(m["pid"], P.logs / f"{name}.log")
                 if proc.poll() is None:
                     self.procs[name], self.meta[name] = proc, m
 
@@ -137,16 +164,11 @@ class Jobs:
         self.state.write_text(json.dumps(live))
 
     def running(self) -> dict:
-        out = {}
-        for name, proc in list(self.procs.items()):
-            if proc.poll() is None:
-                out[name] = {"pid": proc.pid, "since": self.meta[name]["since"], "params": self.meta[name]["params"]}
-            else:
-                self.meta[name]["exit"] = proc.returncode
-        return out
+        return {n: {"pid": p.pid, "since": self.meta[n]["since"], "params": self.meta[n]["params"]}
+                for n, p in list(self.procs.items()) if p.poll() is None}
 
     def last(self) -> dict:
-        return {n: {"exit": m.get("exit"), "since": m["since"]} for n, m in self.meta.items() if self.procs[n].poll() is not None}
+        return {n: {"exit": p.poll(), "since": self.meta[n]["since"]} for n, p in self.procs.items() if p.poll() is not None}
 
     def start(self, job: str, params: dict) -> dict:
         with self.lock:
@@ -155,18 +177,19 @@ class Jobs:
                 return {"ok": False, "error": f"{job} is already running"}
             if job in GPU_JOBS and (busy := GPU_JOBS & set(run)):
                 return {"ok": False, "error": f"the GPU is busy with {', '.join(busy)}; stop it first"}
-            defaults = job_defs(self.P)[job][1]
-            p = {**defaults, **(params or {})}
+            p = {**job_defs(self.P)[job][1], **(params or {})}
             cmd = build_cmd(job, p, self.P)
             env = {**os.environ, "PYTHONWARNINGS": "ignore", "PYTHONIOENCODING": "utf-8",
                    "PATH": comfy_scripts() + os.pathsep + os.environ.get("PATH", ""),
                    "IRIS_MODELS": os.environ.get("IRIS_MODELS", r"E:\ComfyUI\models")}
-            log = open(self.P.logs / f"{job}.log", "a", encoding="utf-8")
-            log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} start {job}: {' '.join(cmd)}\n")
-            log.flush()
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-            self.procs[job] = subprocess.Popen(cmd, cwd=HERE, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                               creationflags=flags)
+            log = self.P.logs / f"{job}.log"
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} start {job}: {' '.join(cmd)}\n")
+            args = json.dumps({"cmd": cmd, "cwd": str(HERE), "env": env, "log": str(log)})
+            out = subprocess.run([sys.executable, "-c", LAUNCHER, args], capture_output=True, text=True, timeout=60)
+            if out.returncode != 0 or not out.stdout.strip().isdigit():
+                return {"ok": False, "error": f"could not start {job}: {out.stderr[-400:]}"}
+            self.procs[job] = Proc(int(out.stdout.strip()), log)
             self.meta[job] = {"since": time.time(), "params": p}
             self.save()
             return {"ok": True, "pid": self.procs[job].pid}
@@ -175,10 +198,7 @@ class Jobs:
         proc = self.procs.get(job)
         if not proc or proc.poll() is not None:
             return {"ok": False, "error": f"{job} is not running"}
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
-        else:
-            os.killpg(proc.pid, signal.SIGTERM)
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
         with open(self.P.logs / f"{job}.log", "a", encoding="utf-8") as log:
             log.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')} stopped from the dashboard\n")
         time.sleep(0.5)
@@ -209,7 +229,7 @@ _img_cache = {"t": 0.0, "n": 0}
 
 def image_count(P: Paths) -> int:
     if time.time() - _img_cache["t"] > 30:
-        _img_cache["n"] = sum(1 for e in os.scandir(P.images) if e.name.endswith(".json"))
+        _img_cache["n"] = sum(1 for e in os.scandir(P.images) if e.name.endswith(".json") and not e.name.startswith("."))
         _img_cache["t"] = time.time()
     return _img_cache["n"]
 
@@ -230,30 +250,31 @@ def rate_from_log(text: str) -> dict:
     return {"s_per_item": float(m[-1][0]), "eta_h": float(m[-1][1])} if m else {}
 
 
+def fetch_state(P: Paths) -> dict:
+    tars, got, total = [], 0, 0
+    for st in sorted(P.images.glob(".*.state.json")):
+        s = json.loads(st.read_text())
+        size = s.get("size") or 0
+        done = size if s.get("done") else min(s.get("offset", 0), size or s.get("offset", 0))
+        got += done
+        total += size
+        name = (s.get("url") or st.name).rsplit("/", 1)[-1]
+        tars.append({"tar": name, "done": bool(s.get("done")), "pct": round(100 * done / size, 1) if size else None})
+    return {"pct": round(100 * got / total, 1) if total else 0, "images": image_count(P), "tars": tars}
+
+
 def status(P: Paths, jobs: Jobs) -> dict:
     s = {"data": str(P.data), "running": jobs.running(), "finished": jobs.last(), "time": time.time()}
-    # download
-    done_bytes = 0
-    tars = []
-    for i, size in TAR_SIZES.items():
-        st = P.images / f".batch_{i}.state.json"
-        state = json.loads(st.read_text()) if st.exists() else {"offset": 0, "done": False}
-        got = size if state.get("done") else min(state.get("offset", 0), size)
-        done_bytes += got
-        tars.append({"tar": i, "done": bool(state.get("done")), "pct": round(100 * got / size, 1)})
-    s["fetch"] = {"pct": round(100 * done_bytes / sum(TAR_SIZES.values()), 1), "images": image_count(P), "tars": tars}
-    # prep / captions / cache
-    images = image_count(P)
-    manifest = line_count(P.manifest)
+    s["fetch"] = fetch_state(P)
+    images, manifest = image_count(P), line_count(P.manifest)
     s["prep"] = {"manifest": manifest, "images": images}
     caps = line_count(P.captions)
     s["caption"] = {"done": caps, "total": manifest, "pct": round(100 * caps / manifest, 1) if manifest else 0,
-                    **rate_from_log(tail(P.logs / "caption.log", 30) or tail(P.data / "pipeline.log", 30))}
+                    **rate_from_log(tail(P.logs / "caption.log", 30))}
     enc = line_count(P.cache / "index.jsonl")
     s["encode"] = {"done": enc, "total": caps, "pct": round(100 * enc / caps, 1) if caps else 0,
                    "shards": len(list(P.cache.glob("shard_*.safetensors"))) if P.cache.exists() else 0}
     s["excluded"] = line_count(P.excluded, ttl=0)
-    # training
     s["train"] = [run_summary(r) for r in sorted(P.runs.iterdir()) if r.is_dir()] if P.runs.exists() else []
     return s
 
@@ -284,7 +305,7 @@ def run_summary(run: Path, history: bool = False) -> dict:
 def excluded_set(P: Paths) -> set[str]:
     if not P.excluded.exists():
         return set()
-    return {l.strip() for l in P.excluded.read_text(encoding="utf-8").splitlines() if l.strip()}
+    return {line.strip() for line in P.excluded.read_text(encoding="utf-8").splitlines() if line.strip()}
 
 
 _cap_cache = {"mtime": None, "map": {}}
@@ -319,8 +340,8 @@ def dataset(P: Paths, offset: int, limit: int, q: str, only_excluded: bool) -> d
             if only_excluded and r["path"] not in ex:
                 continue
             if offset <= total < offset + limit:
-                rows.append({"path": r["path"], "caption": cap, "tags": r.get("tags", [])[:40],
-                             "bucket": r.get("bucket"), "excluded": r["path"] in ex})
+                rows.append({"path": r["path"], "caption": cap, "tags": r.get("tags", [])[:40], "bucket": r.get("bucket"),
+                             "size": [r.get("width"), r.get("height")], "excluded": r["path"] in ex})
             total += 1
     return {"source": f"{len(caps)} captioned", "total": total, "rows": rows}
 
@@ -332,15 +353,21 @@ def set_excluded(P: Paths, path: str, excluded: bool) -> dict:
     return {"ok": True, "excluded": len(ex)}
 
 
+def allowed_file(P: Paths, path: str) -> Path | None:
+    """Only files inside the pipeline's own folders are served."""
+    src = Path(path).resolve()
+    if (P.data.resolve() in src.parents or HERE.resolve() in src.parents) and src.is_file():
+        return src
+    return None
+
+
 def thumbnail(P: Paths, path: str) -> Path | None:
     from hashlib import md5
 
     from PIL import Image
 
-    src = Path(path).resolve()
-    if P.data.resolve() not in src.parents and HERE.resolve() not in src.parents:
-        return None  # only files from the pipeline's own folders
-    if not src.exists():
+    src = allowed_file(P, path)
+    if not src:
         return None
     th = P.thumbs / (md5(str(src).encode()).hexdigest() + ".jpg")
     if not th.exists():
@@ -367,7 +394,7 @@ def make_handler(P: Paths, jobs: Jobs):
             self.end_headers()
             self.wfile.write(data)
 
-        def file(self, path: Path):
+        def file(self, path: Path | None):
             if not path or not path.exists():
                 return self.send(404, {"error": "not found"})
             self.send(200, path.read_bytes(), mimetypes.guess_type(path.name)[0] or "application/octet-stream")
@@ -388,8 +415,7 @@ def make_handler(P: Paths, jobs: Jobs):
                     return self.send(200, {k: {"desc": d, "params": p, "gpu": k in GPU_JOBS} for k, (d, p) in job_defs(P).items()})
                 if u.path == "/api/log":
                     name = re.sub(r"[^a-z]", "", q.get("job", ""))
-                    path = P.logs / f"{name}.log" if name != "pipeline" else P.data / "pipeline.log"
-                    return self.send(200, {"text": tail(path, int(q.get("lines", 200)))})
+                    return self.send(200, {"text": tail(P.logs / f"{name}.log", int(q.get("lines", 200)))})
                 if u.path == "/api/dataset":
                     return self.send(200, dataset(P, int(q.get("offset", 0)), int(q.get("limit", 60)), q.get("q", ""),
                                                   q.get("excluded") == "1"))
@@ -397,6 +423,8 @@ def make_handler(P: Paths, jobs: Jobs):
                     return self.send(200, [run_summary(r, history=True) for r in sorted(P.runs.iterdir()) if r.is_dir()])
                 if u.path == "/thumb":
                     return self.file(thumbnail(P, q.get("path", "")))
+                if u.path == "/image":
+                    return self.file(allowed_file(P, q.get("path", "")))
                 if u.path == "/preview":
                     run = P.runs / re.sub(r"[\\/:]", "", q.get("run", ""))
                     return self.file(run / re.sub(r"[\\/:]", "", q.get("file", "")))

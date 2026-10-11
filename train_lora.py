@@ -202,6 +202,9 @@ def main():
     ap.add_argument("--preview-every", type=int, default=500)
     ap.add_argument("--checkpointing", default="full", choices=["none", "full", "selective_op", "selective_layer"])
     ap.add_argument("--resume", action="store_true", help="continue from <out>/state.pt")
+    ap.add_argument("--init-lora", default=None,
+                    help="start from this LoRA file (same rank) with a fresh optimizer and schedule, e.g. to keep "
+                         "training a finished LoRA on more or new images")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--exclude", default=None, help="text file of image paths to leave out (one per line)")
     args = ap.parse_args()
@@ -227,6 +230,19 @@ def main():
 
     opt = torch.optim.AdamW(params, lr=args.lr, betas=(0.9, 0.999), weight_decay=0.0)
     step = 0
+    if args.init_lora and not (args.resume and (out / "state.pt").exists()):
+        with safe_open(args.init_lora, framework="pt") as f:
+            init_meta = f.metadata() or {}
+        if int(init_meta.get("rank", -1)) != args.rank:
+            raise SystemExit(f"--init-lora has rank {init_meta.get('rank')}, but --rank is {args.rank}")
+        init = load_file(args.init_lora)
+        missing = [p for p in layers if f"{p}.lora_down" not in init]
+        if missing:
+            raise SystemExit(f"--init-lora lacks {len(missing)} layers (different --targets?), e.g. {missing[:3]}")
+        for prefix, layer in layers.items():
+            layer.down.weight.data.copy_(init[f"{prefix}.lora_down"])
+            layer.up.weight.data.copy_(init[f"{prefix}.lora_up"])
+        print(f"starting from {args.init_lora}")
     if args.resume and (out / "state.pt").exists():
         state = torch.load(out / "state.pt", map_location="cpu", weights_only=True)
         lora = state["lora"]
