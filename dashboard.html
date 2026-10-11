@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iris Trainer</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a; --text: #e6e8ee; --muted: #9aa3b2;
+    --accent: #7c9cff; --ok: #4cc38a; --warn: #e5b350; --bad: #ef6b6b; --bar: #2b3240;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, Segoe UI, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .muted { margin-left: auto; }
+  nav button { background: none; border: 0; color: var(--muted); font: inherit; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+  nav button.on { color: var(--text); background: var(--panel2); }
+  main { padding: 18px 20px; max-width: 1400px; margin: 0 auto; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card h3 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--panel2); color: var(--muted); }
+  .pill.run { background: #1d3a2c; color: var(--ok); }
+  .pill.err { background: #3a1d1d; color: var(--bad); }
+  .bar { height: 8px; background: var(--bar); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button.act { background: var(--accent); color: #0b0d12; border: 0; border-radius: 6px; padding: 6px 12px; font-weight: 600; cursor: pointer; }
+  button.act.stop { background: var(--bad); color: #fff; }
+  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .params { display: grid; grid-template-columns: 110px 1fr; gap: 6px 8px; margin-top: 8px; }
+  .params label { color: var(--muted); font-size: 12px; align-self: center; }
+  input[type=text], input[type=number], select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font: inherit; width: 100%; }
+  pre.log { background: #0a0c10; border: 1px solid var(--line); border-radius: 8px; padding: 12px; height: 60vh; overflow: auto; white-space: pre-wrap; font: 12px/1.4 Consolas, monospace; margin: 0; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
+  .tile img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
+  .tile.ex { opacity: .35; outline: 2px solid var(--bad); }
+  body.blur .tile img, body.blur .modal img { filter: blur(18px); }
+  .tile .cap { font-size: 11px; padding: 6px 8px; color: var(--muted); max-height: 3.2em; overflow: hidden; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: none; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
+  .modal.on { display: flex; }
+  .modal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; max-width: 1100px; width: 100%; max-height: 92vh; display: grid; grid-template-columns: minmax(0, 1fr) 380px; overflow: hidden; }
+  .modal img { width: 100%; height: 92vh; max-height: 92vh; object-fit: contain; background: #000; }
+  .modal .side { padding: 14px; overflow: auto; max-height: 92vh; }
+  svg.chart { width: 100%; height: 220px; background: #0a0c10; border: 1px solid var(--line); border-radius: 8px; }
+  .previews img { width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+  @media (max-width: 800px) { .modal .box { grid-template-columns: 1fr; } .modal img { height: 50vh; } }
+</style>
+</head>
+<body class="blur">
+<header>
+  <h1>Iris Trainer</h1>
+  <nav>
+    <button data-tab="pipeline" class="on">Pipeline</button>
+    <button data-tab="dataset">Dataset</button>
+    <button data-tab="training">Training</button>
+    <button data-tab="logs">Logs</button>
+  </nav>
+  <span class="muted" id="where"></span>
+  <label class="muted"><input type="checkbox" id="blur" checked> blur images</label>
+</header>
+<main>
+  <section id="tab-pipeline">
+    <div class="grid" id="stages"></div>
+  </section>
+
+  <section id="tab-dataset" hidden>
+    <div class="row" style="margin-bottom:12px">
+      <input type="text" id="q" placeholder="search captions and tags" style="max-width:320px">
+      <label class="muted"><input type="checkbox" id="onlyEx"> excluded only</label>
+      <span class="muted" id="dsInfo"></span>
+      <span style="margin-left:auto" class="row">
+        <button class="ghost" id="prev">Prev</button><span class="muted" id="page"></span><button class="ghost" id="next">Next</button>
+      </span>
+    </div>
+    <div class="gallery" id="gallery"></div>
+  </section>
+
+  <section id="tab-training" hidden>
+    <div class="row" style="margin-bottom:12px"><select id="run" style="max-width:260px"></select><span class="muted" id="runInfo"></span></div>
+    <svg class="chart" id="chart" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg>
+    <h3 style="margin:18px 0 8px">Previews</h3>
+    <div class="grid previews" id="previews"></div>
+  </section>
+
+  <section id="tab-logs" hidden>
+    <div class="row" style="margin-bottom:10px">
+      <select id="logJob" style="max-width:200px"></select>
+      <label class="muted"><input type="checkbox" id="follow" checked> follow</label>
+    </div>
+    <pre class="log" id="log"></pre>
+  </section>
+</main>
+
+<div class="modal" id="modal"><div class="box"><img id="mImg" alt=""><div class="side">
+  <div class="row" style="justify-content:space-between"><b>Image</b><button class="ghost" id="mClose">Close</button></div>
+  <p class="muted" id="mPath" style="word-break:break-all;font-size:11px"></p>
+  <button class="act" id="mEx"></button>
+  <h4>Caption</h4><p id="mCap"></p>
+  <h4>Tags</h4><p class="muted" id="mTags" style="font-size:12px"></p>
+</div></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (url, body) => fetch(url, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {}).then(r => r.json());
+const fmt = n => n == null ? "" : n.toLocaleString();
+let JOBS = {}, STATUS = null, tab = "pipeline";
+
+// ---- tabs
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  tab = b.dataset.tab;
+  document.querySelectorAll("main section").forEach(s => s.hidden = s.id !== "tab-" + tab);
+  if (tab === "dataset") loadDataset();
+  if (tab === "training") loadRuns();
+  if (tab === "logs") loadLog();
+});
+$("#blur").onchange = e => document.body.classList.toggle("blur", e.target.checked);
+
+// ---- pipeline
+const ORDER = ["fetch", "prep", "caption", "encode", "train", "merge"];
+function stageInfo(job, s) {
+  if (job === "fetch") return {pct: s.fetch.pct, text: `${fmt(s.fetch.images)} images kept · tars ${s.fetch.tars.map(t => t.done ? "done" : t.pct + "%").join(" / ")}`};
+  if (job === "prep") return {pct: s.prep.images ? Math.min(100, 100 * s.prep.manifest / s.prep.images) : 0, text: `${fmt(s.prep.manifest)} in manifest of ${fmt(s.prep.images)} images`};
+  if (job === "caption") return {pct: s.caption.pct, text: `${fmt(s.caption.done)} / ${fmt(s.caption.total)} captioned` + (s.caption.s_per_item ? ` · ${s.caption.s_per_item} s/image · ${s.caption.eta_h} h left` : "")};
+  if (job === "encode") return {pct: s.encode.pct, text: `${fmt(s.encode.done)} / ${fmt(s.encode.total)} cached · ${s.encode.shards} shards`};
+  if (job === "train") {
+    const r = s.train.find(x => x.name === (JOBS.train?.params?.name)) || s.train[s.train.length - 1];
+    return r ? {pct: r.pct || 0, text: `${r.name}: step ${fmt(r.step)}${r.steps ? " / " + fmt(r.steps) : ""}` + (r.loss_avg != null ? ` · loss ${r.loss_avg.toFixed(4)}` : "") + ` · ${r.loras.length} saves`} : {pct: 0, text: "no runs yet"};
+  }
+  if (job === "merge") { const all = s.train.flatMap(r => r.loras.map(l => r.name + "/" + l)); return {pct: null, text: all.length ? `latest save: ${all[all.length - 1]}` : "train first"}; }
+}
+function renderStages(s) {
+  const box = $("#stages");
+  if (!box.children.length) box.innerHTML = ORDER.map(j => `
+    <div class="card" id="c-${j}">
+      <h3>${j[0].toUpperCase() + j.slice(1)} <span class="pill" id="p-${j}">idle</span>${JOBS[j].gpu ? '<span class="pill">GPU</span>' : ""}</h3>
+      <div class="muted" style="font-size:12px">${JOBS[j].desc}</div>
+      <div class="bar"><i id="b-${j}"></i></div>
+      <div class="muted" id="t-${j}" style="font-size:12px;min-height:18px"></div>
+      <div class="row" style="margin-top:8px"><button class="act" id="go-${j}">Start</button><button class="ghost" data-log="${j}">Log</button></div>
+      <details><summary>Settings</summary><div class="params" id="f-${j}">${Object.entries(JOBS[j].params).map(([k, v]) =>
+        `<label>${k}</label>` + (typeof v === "boolean" ? `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>` : `<input type="${typeof v === "number" ? "number" : "text"}" step="any" data-k="${k}" value="${v}">`)).join("")}</div></details>
+    </div>`).join("");
+  ORDER.forEach(j => {
+    const info = stageInfo(j, s), running = !!s.running[j], last = s.finished[j];
+    $("#b-" + j).style.width = (info.pct ?? 0) + "%";
+    $("#t-" + j).textContent = info.text;
+    const pill = $("#p-" + j);
+    pill.textContent = running ? "running" : last ? (last.exit === 0 ? "finished" : `exit ${last.exit}`) : "idle";
+    pill.className = "pill" + (running ? " run" : last && last.exit ? " err" : "");
+    const go = $("#go-" + j);
+    go.textContent = running ? "Stop" : "Start";
+    go.className = "act" + (running ? " stop" : "");
+    go.onclick = async () => {
+      const params = {};
+      $("#f-" + j).querySelectorAll("input").forEach(i => params[i.dataset.k] = i.type === "checkbox" ? i.checked : i.type === "number" ? Number(i.value) : i.value);
+      const r = running ? await api("/api/jobs/stop", {job: j}) : await api("/api/jobs/start", {job: j, params});
+      if (!r.ok) alert(r.error);
+      refresh();
+    };
+  });
+  document.querySelectorAll("[data-log]").forEach(b => b.onclick = () => { $("#logJob").value = b.dataset.log; document.querySelector('nav [data-tab="logs"]').click(); });
+  const merge = $("#f-merge [data-k=lora]");
+  if (merge && !merge.value) { const r = s.train[s.train.length - 1]; if (r && r.loras.length) merge.value = `${s.data}\\runs\\${r.name}\\${r.loras[r.loras.length - 1]}`; }
+  $("#where").textContent = `data: ${s.data} · ${s.excluded} excluded`;
+}
+async function refresh() {
+  STATUS = await api("/api/status");
+  renderStages(STATUS);
+  if (tab === "logs" && $("#follow").checked) loadLog();
+  if (tab === "training") loadRuns(true);
+}
+
+// ---- logs
+async function loadLog() {
+  const r = await api(`/api/log?job=${$("#logJob").value}&lines=400`);
+  const el = $("#log"), atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.textContent = r.text || "(empty)";
+  if (atEnd || $("#follow").checked) el.scrollTop = el.scrollHeight;
+}
+$("#logJob").onchange = loadLog;
+
+// ---- dataset
+let dsOffset = 0; const LIMIT = 60;
+async function loadDataset() {
+  const r = await api(`/api/dataset?offset=${dsOffset}&limit=${LIMIT}&q=${encodeURIComponent($("#q").value)}&excluded=${$("#onlyEx").checked ? 1 : 0}`);
+  $("#dsInfo").textContent = `${fmt(r.total)} images (${r.source})`;
+  $("#page").textContent = r.total ? `${dsOffset + 1}-${Math.min(dsOffset + LIMIT, r.total)}` : "";
+  $("#gallery").innerHTML = r.rows.map((x, i) => `<div class="tile ${x.excluded ? "ex" : ""}" data-i="${i}"><img loading="lazy" src="/thumb?path=${encodeURIComponent(x.path)}" alt=""><div class="cap">${(x.caption || x.tags.join(", ")).replace(/</g, "&lt;")}</div></div>`).join("");
+  $("#gallery").querySelectorAll(".tile").forEach(t => t.onclick = () => openModal(r.rows[t.dataset.i], t));
+}
+$("#q").onchange = () => { dsOffset = 0; loadDataset(); };
+$("#onlyEx").onchange = () => { dsOffset = 0; loadDataset(); };
+$("#prev").onclick = () => { dsOffset = Math.max(0, dsOffset - LIMIT); loadDataset(); };
+$("#next").onclick = () => { dsOffset += LIMIT; loadDataset(); };
+function openModal(x, tile) {
+  $("#mImg").src = `/thumb?path=${encodeURIComponent(x.path)}`;
+  $("#mPath").textContent = x.path;
+  $("#mCap").textContent = x.caption || "(no caption yet)";
+  $("#mTags").textContent = x.tags.join(", ");
+  const btn = $("#mEx");
+  const draw = () => { btn.textContent = x.excluded ? "Include again" : "Exclude from training"; btn.className = "act" + (x.excluded ? "" : " stop"); };
+  draw();
+  btn.onclick = async () => { x.excluded = !x.excluded; await api("/api/exclude", {path: x.path, excluded: x.excluded}); tile.classList.toggle("ex", x.excluded); draw(); };
+  $("#modal").classList.add("on");
+}
+$("#mClose").onclick = () => $("#modal").classList.remove("on");
+$("#modal").onclick = e => { if (e.target.id === "modal") $("#modal").classList.remove("on"); };
+
+// ---- training
+let RUNS = [];
+async function loadRuns(quiet) {
+  RUNS = await api("/api/runs");
+  const sel = $("#run"), cur = sel.value;
+  sel.innerHTML = RUNS.map(r => `<option>${r.name}</option>`).join("");
+  if (cur && RUNS.some(r => r.name === cur)) sel.value = cur;
+  drawRun(quiet);
+}
+$("#run").onchange = () => drawRun();
+function drawRun(quiet) {
+  const r = RUNS.find(x => x.name === $("#run").value);
+  const svg = $("#chart");
+  if (!r) { svg.innerHTML = ""; $("#runInfo").textContent = "no runs yet"; return; }
+  $("#runInfo").textContent = `step ${fmt(r.step)}${r.steps ? " / " + fmt(r.steps) : ""} · ${r.loras.length} LoRA saves`;
+  const h = r.history || [];
+  if (h.length > 1) {
+    const xs = h.map(p => p[0]), ys = h.map(p => p[2]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const px = x => 10 + 980 * (x - x0) / Math.max(1, x1 - x0), py = y => 210 - 200 * (y - y0) / Math.max(1e-9, y1 - y0);
+    const raw = h.map(p => `${px(p[0]).toFixed(1)},${py(Math.min(Math.max(p[1], y0), y1)).toFixed(1)}`).join(" ");
+    const avg = h.map(p => `${px(p[0]).toFixed(1)},${py(p[2]).toFixed(1)}`).join(" ");
+    svg.innerHTML = `<polyline points="${raw}" fill="none" stroke="#3a4560" stroke-width="1"/><polyline points="${avg}" fill="none" stroke="#7c9cff" stroke-width="2.5"/>
+      <text x="14" y="18" fill="#9aa3b2" font-size="12">loss (avg) ${y1.toFixed(4)}</text><text x="14" y="206" fill="#9aa3b2" font-size="12">${y0.toFixed(4)}</text>`;
+  } else svg.innerHTML = `<text x="20" y="110" fill="#9aa3b2" font-size="14">no loss data yet</text>`;
+  if (!quiet || !$("#previews").children.length)
+    $("#previews").innerHTML = r.previews.slice().reverse().map(p => `<div class="card"><div class="muted" style="font-size:12px;margin-bottom:6px">${p}</div><img loading="lazy" src="/preview?run=${encodeURIComponent(r.name)}&file=${encodeURIComponent(p)}"></div>`).join("") || '<p class="muted">Previews appear every few hundred steps.</p>';
+}
+
+// ---- boot
+(async () => {
+  JOBS = await api("/api/jobs");
+  $("#logJob").innerHTML = ["pipeline", ...ORDER].map(j => `<option>${j}</option>`).join("");
+  await refresh();
+  setInterval(refresh, 4000);
+})();
+</script>
+</body>
+</html>

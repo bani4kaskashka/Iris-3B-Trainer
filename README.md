@@ -38,9 +38,25 @@ python merge_lora.py runs/my_lora/lora_010000.safetensors --name my_model
 
 Useful options: `--rank`, `--lr` (1e-4), `--batch` / `--accum`, `--steps`, `--checkpointing` (`full` saves the most memory), `--flip` (only if your images have no text).
 
+## Dashboard
+
+```
+python dashboard.py --data D:\Iris-data
+```
+
+Opens on http://127.0.0.1:7861 (local only). It shows the progress of every step with ETAs, starts and stops each job with its settings, follows the logs, charts the training loss with the preview images, and has a dataset browser where you can read captions and exclude images from training (thumbnails are blurred until you untick it). Jobs keep running if you close the page, and a restarted dashboard picks them back up. Only one GPU job runs at a time.
+
+Everything it does goes through a small JSON API (`/api/status`, `/api/jobs/start`, `/api/jobs/stop`, `/api/log`, `/api/dataset`, `/api/exclude`, `/api/runs`), so you can script it too.
+
+## Danbooru metadata tools
+
+- **analyze_meta.py** counts what a Danbooru `posts.json` would give after each filter.
+- **fetch_filtered.py** streams the tar batches of a Danbooru-derived Hugging Face dataset and saves only the allowed images, each with a json sidecar of its tags. Rejected files are never written to disk, and a dropped connection resumes where it left off.
+- **convert_comfy_vlm.py** turns a ComfyUI single-file Qwen3-VL (fp8_scaled, with its vision tower) back into a Hugging Face folder that `caption.py` can use.
+
 ## Content rule
 
-`safety.py` drops anything that depicts or suggests a minor: hard-blocked tags (loli, shota, child, school uniforms and more), suspicious tag combinations, and any generated caption that mentions a child, teen, student or an age. It runs in both prep and captioning and has no off switch. You can add tags to block in `blocked_tags_extra.txt`, but not remove built-in ones.
+`safety.py` drops anything that depicts or suggests a minor: hard-blocked tags (loli, shota, child, school uniforms and more), suspicious tag combinations, and any generated caption that mentions a child, teen, student or an age. Explicit and suggestive images are also dropped when they're school-coded (uniforms, classrooms and so on) or come from student-cast series or canonically underage characters; clean general-rated images keep their school uniforms. Captions call adult characters women and men. It runs in prep, fetching and captioning and has no off switch. You can add tags to block in `blocked_tags_extra.txt`, but not remove built-in ones.
 
 ## How much data
 

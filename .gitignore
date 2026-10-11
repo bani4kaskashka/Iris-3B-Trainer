@@ -5,3 +5,4 @@ runs/
 smoke_data/
 *.safetensors
 *.pt
+data/

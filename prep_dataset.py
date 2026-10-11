@@ -19,7 +19,7 @@ from pathlib import Path
 from PIL import Image
 
 from common import bucket_for, write_jsonl
-from safety import tags_blocked
+from safety import minor_series_or_character, school_blocked, tags_blocked
 
 EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 RATING = {"g": "general", "s": "sensitive", "q": "questionable", "e": "explicit"}
@@ -41,6 +41,14 @@ def read_tags(img: Path) -> tuple[list[str], str | None]:
     return [], None
 
 
+def post_like(img: Path, tags) -> dict:
+    """danbooru json sidecars carry character/copyright tags; otherwise check all tags."""
+    js = img.with_suffix(".json")
+    if js.exists():
+        return json.loads(js.read_text(encoding="utf-8"))
+    return {"tag_string": " ".join(tags)}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--images", required=True, nargs="+")
@@ -59,7 +67,8 @@ def main():
         if args.require_tags and not tags:
             why["no tags"] += 1
             continue
-        if reason := tags_blocked(tags):
+        if reason := tags_blocked(tags) or school_blocked(tags, rating) or (
+                rating not in ("g", "general") and minor_series_or_character(post_like(path, tags))):
             why["minors filter: " + reason.split()[0]] += 1
             continue
         if keep_ratings and rating not in keep_ratings:

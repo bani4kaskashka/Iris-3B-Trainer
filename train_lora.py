@@ -131,10 +131,11 @@ def load_image(path: str, size: tuple[int, int], flip: bool) -> torch.Tensor:
 class Batches:
     """Endless batches of one bucket each, buckets drawn in proportion to their size."""
 
-    def __init__(self, rows, batch: int):
+    def __init__(self, rows, batch: int, skip: set[str] = frozenset()):
         self.by_bucket = {}
-        for i, r in enumerate(rows):
-            self.by_bucket.setdefault(tuple(r["bucket"]), []).append(i)
+        for i, r in enumerate(rows):  # i stays the row's index into the text cache
+            if r["path"] not in skip:
+                self.by_bucket.setdefault(tuple(r["bucket"]), []).append(i)
         self.batch, self.keys = batch, list(self.by_bucket)
         self.weights = [len(self.by_bucket[k]) for k in self.keys]
         self.queues = {k: [] for k in self.keys}
@@ -202,6 +203,7 @@ def main():
     ap.add_argument("--checkpointing", default="full", choices=["none", "full", "selective_op", "selective_layer"])
     ap.add_argument("--resume", action="store_true", help="continue from <out>/state.pt")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--exclude", default=None, help="text file of image paths to leave out (one per line)")
     args = ap.parse_args()
 
     from iris3b.flow.transport import RectifiedFlow
@@ -243,7 +245,11 @@ def main():
 
     flow = RectifiedFlow(cfg.flow)
     cache = TextCache(Path(args.cache), cfg.model.text_len)
-    batches = Batches(rows, args.batch)
+    skip = set()
+    if args.exclude and Path(args.exclude).exists():
+        skip = {l.strip() for l in Path(args.exclude).read_text(encoding="utf-8").splitlines() if l.strip()}
+    batches = Batches(rows, args.batch, skip)
+    print(f"{len(rows) - len(skip & {r['path'] for r in rows})} images to train on ({len(skip)} excluded)")
     meta = {"rank": str(args.rank), "alpha": str(alpha), "extra": json.dumps(
         {"base": "speridlabs/iris-3b", "targets": args.targets, "kind": "iris3b-lora"})}
 

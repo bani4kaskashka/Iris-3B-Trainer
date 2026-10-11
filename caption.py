@@ -12,6 +12,7 @@ tags said. Resumable: rows already in --out are skipped.
 
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 
@@ -28,16 +29,31 @@ META = {"highres", "absurdres", "lowres", "commentary", "commentary_request", "e
         "web_address", "patreon_username", "twitter_username", "censored", "uncensored", "jpeg_artifacts"}
 
 PROMPT = (
-    "Write a caption for this anime illustration to train an image generator. In 2 to 4 sentences, describe "
-    "plainly and literally: the adult character(s) and their appearance (hair, eyes, body), clothing or "
-    "nudity, pose and what they are doing, any sexual activity, the setting, lighting, colors and art style. "
-    "Use direct, explicit words for anatomy and acts where they are visible. Do not guess names. "
-    "Helpful tags for this image: {tags}"
+    "Write a caption for this anime illustration to train an image generator. In 2 or 3 sentences (under 90 "
+    "words), describe plainly and literally: the adult characters (always call them woman, women, man or men), "
+    "their appearance, clothing or nudity, pose and what they are doing, any sexual activity, the setting, "
+    "lighting and art style. Use direct, explicit words for anatomy and acts where they are visible. "
+    "Do not guess names. Helpful tags for this image: {tags}"
 )
+MAX_TAGS = 30
+# danbooru's people-count tags, said in adult words
+COUNT_TAGS = {"1girl": "one woman", "2girls": "two women", "3girls": "three women", "4girls": "four women",
+              "multiple_girls": "multiple women", "1boy": "one man", "2boys": "two men", "3boys": "three men",
+              "multiple_boys": "multiple men", "1other": "one person", "solo": "solo"}
+# whole words only (letters may not touch either side); "girl_on_top" style tags arrive with spaces
+ADULT_WORDS = [(w, r) for w, r in (("girls", "women"), ("girl", "woman"), ("boys", "men"), ("boy", "man"))]
+_EDGE = ('(?<![A-Za-z])', '(?![A-Za-z])')
+
+
+def adult_words(text: str) -> str:
+    for word, adult in ADULT_WORDS:
+        text = re.sub(_EDGE[0] + word + _EDGE[1], adult, text, flags=re.I)
+    return text
 
 
 def tag_text(tags) -> str:
-    return ", ".join(t.replace("_", " ") for t in tags if t.lower() not in META)
+    out = [COUNT_TAGS.get(t, t.replace("_", " ")) for t in tags if t.lower() not in META]
+    return ", ".join(adult_words(t) for t in out[:MAX_TAGS])
 
 
 def load_vlm(path: str, device):
@@ -58,7 +74,7 @@ def vlm_caption(processor, model, image: Image.Image, tags: str, device, max_sid
                                              {"type": "text", "text": PROMPT.format(tags=tags or "none")}]}]
     inputs = processor.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
                                            return_dict=True, return_tensors="pt").to(device)
-    out = model.generate(**inputs, max_new_tokens=220, do_sample=False)
+    out = model.generate(**inputs, max_new_tokens=140, do_sample=False)
     return processor.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0].strip()
 
 
@@ -91,7 +107,7 @@ def main():
                     text = ""  # refusal: fall back to the tags alone
             else:
                 text = ""
-            caption = args.prefix + " ".join(x for x in (text, tags) if x)
+            caption = args.prefix + " ".join(x for x in (adult_words(text), tags) if x)
             if reason := caption_blocked(caption):
                 dropped += 1
                 print(f"  dropped ({reason}): {row['path']}")
