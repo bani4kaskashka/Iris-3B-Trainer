@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+work/
+runs/
+smoke_data/
+*.safetensors
+*.pt

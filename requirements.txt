@@ -1,0 +1,6 @@
+omegaconf>=2.3
+safetensors>=0.4
+transformers>=4.57.0
+huggingface_hub
+pillow
+numpy
