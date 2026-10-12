@@ -13,6 +13,7 @@ whose short side is under --min-side, unreadable files and exact duplicates.
 import argparse
 import hashlib
 import json
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -38,7 +39,19 @@ def read_tags(img: Path) -> tuple[list[str], str | None]:
         tags = [t.strip() for t in raw.split(",")] if "," in raw else raw.split()
         rating = next((t.split(":", 1)[1] for t in tags if t.startswith("rating:")), None)
         return [t for t in tags if t and not t.startswith("rating:")], RATING.get(rating, rating)
-    return [], None
+    return filename_tags(img.stem), None
+
+
+# "yande.re 123456 sample tag1 tag2", "Konachan.com - 123456 tag1 tag2", "moe 123456 tag1"
+BOORU_NAME = re.compile(r"^(?:yande\.re|konachan\.(?:com|net)\s*-|moe)\s+\d+\s+(.*)$", re.I)
+
+
+def filename_tags(stem: str) -> list[str]:
+    """Tags that yande.re / konachan / moe.imouto put in their download file names."""
+    m = BOORU_NAME.match(stem.strip())
+    if not m:
+        return []
+    return [t for t in m.group(1).split() if t.lower() not in ("sample", "jpeg", "png")]
 
 
 def post_like(img: Path, tags) -> dict:

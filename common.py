@@ -7,15 +7,18 @@ from pathlib import Path
 # AOTriton flash attention on ROCm must be switched on before torch loads
 os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
+import settings
+
 HERE = Path(__file__).resolve().parent
 # upstream clone (github.com/speridlabs/iris-3b): model, flow loss and text encoder code
-IRIS_REPO = Path(os.environ.get("IRIS_REPO", HERE.parent / "iris-3b"))
+IRIS_REPO = settings.iris_repo()
 if not (IRIS_REPO / "src" / "iris3b").is_dir():
-    raise SystemExit(f"upstream iris-3b not found at {IRIS_REPO}; clone it there or set IRIS_REPO")
+    raise SystemExit(f"upstream iris-3b not found at {IRIS_REPO}; run start.bat once, or set iris_repo in the "
+                     "dashboard's Settings tab")
 sys.path.insert(0, str(IRIS_REPO / "src"))
 
 # a ComfyUI-style models folder: diffusion_models/iris-3b.safetensors, text_encoders/Qwen3-VL-4B-Instruct
-MODELS = Path(os.environ.get("IRIS_MODELS", HERE / "models"))
+MODELS = settings.models_dir()
 BASE_WEIGHTS = MODELS / "diffusion_models" / "iris-3b.safetensors"
 # the release config.yaml; the copy next to these scripts is used when the clone has none
 BASE_CONFIG = next((p for p in (IRIS_REPO / "checkpoints" / "iris-3b" / "config.yaml", HERE / "iris-3b.yaml") if p.exists()),

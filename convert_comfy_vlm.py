@@ -1,8 +1,8 @@
 """Turn a ComfyUI single-file Qwen3-VL (fp8_scaled, with its vision tower) back into a
 Hugging Face folder that caption.py can load.
 
-    python convert_comfy_vlm.py E:\\ComfyUI\\models\\text_encoders\\Huihui-...-fp8_scaled.safetensors ^
-        --like E:\\ComfyUI\\models\\text_encoders\\Qwen3-VL-4B-Instruct --out D:\\Iris-data\\models\\Huihui-Qwen3-VL-4B
+    python convert_comfy_vlm.py ComfyUI\\models\\text_encoders\\Huihui-...-fp8_scaled.safetensors ^
+        --like models\\text_encoders\\Qwen3-VL-4B-Instruct --out models\\text_encoders\\Huihui-Qwen3-VL-4B
 
 fp8 weights are multiplied by their per-tensor scale back to bf16; config,
 tokenizer and image preprocessor come from a stock folder of the same model.

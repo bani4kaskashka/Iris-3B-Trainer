@@ -2,7 +2,7 @@
 
     python merge_lora.py runs/anime/lora_010000.safetensors --name anime
 
-writes E:\\ComfyUI\\models\\diffusion_models\\iris-3b-anime.safetensors, which the
+writes <models>\\diffusion_models\\iris-3b-anime.safetensors, which the
 ComfyUI Iris model loader picks up like the base model (same config).
 """
 

@@ -6,3 +6,7 @@ smoke_data/
 *.safetensors
 *.pt
 data/
+models/
+iris-3b/
+.venv/
+settings.json

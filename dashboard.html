@@ -4,52 +4,142 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Iris Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a; --text: #e6e8ee; --muted: #9aa3b2;
-    --accent: #7c9cff; --ok: #4cc38a; --warn: #e5b350; --bad: #ef6b6b; --bar: #2b3240;
+    --bg: #0a0a0a; --panel: #101010; --panel2: #161616; --line: #232323; --line2: #333333;
+    --text: #ececec; --muted: #7d7d7d; --dim: #4a4a4a;
+    --accent: #ececec; --ok: #5fd38d; --warn: #e3b341; --bad: #f06a6a; --bar: #1c1c1c;
+    --sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+    color-scheme: dark;
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, Segoe UI, sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
-  header h1 { font-size: 17px; margin: 0; }
-  header .muted { margin-left: auto; }
-  nav button { background: none; border: 0; color: var(--muted); font: inherit; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
-  nav button.on { color: var(--text); background: var(--panel2); }
-  main { padding: 18px 20px; max-width: 1400px; margin: 0 auto; }
+  *, *::before, *::after { box-sizing: border-box; border-radius: 0 !important; }
+  html { background: var(--bg); }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans); letter-spacing: 0.005em; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--text); color: var(--bg); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--line2); border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  * { scrollbar-color: var(--line2) var(--bg); scrollbar-width: thin; }
+
+  /* header and tabs */
+  header { display: flex; align-items: stretch; gap: 0; padding: 0 24px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; height: 52px; }
+  header h1 { font-size: 12px; font-weight: 600; margin: 0 32px 0 0; letter-spacing: 0.18em; text-transform: uppercase; align-self: center; }
+  nav { display: flex; align-items: stretch; }
+  nav button { background: none; border: 0; border-bottom: 1px solid transparent; margin-bottom: -1px; color: var(--muted); font: 500 12px var(--sans); letter-spacing: 0.06em; text-transform: uppercase; padding: 0 16px; cursor: pointer; }
+  nav button:hover { color: var(--text); }
+  nav button.on { color: var(--text); border-bottom-color: var(--text); }
+  header #where { margin-left: auto; align-self: center; font: 11px var(--mono); padding-right: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  header > label { align-self: center; white-space: nowrap; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+  main { padding: 28px 24px 60px; max-width: 1480px; margin: 0 auto; }
   .muted { color: var(--muted); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
-  .card h3 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
-  .pill { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--panel2); color: var(--muted); }
-  .pill.run { background: #1d3a2c; color: var(--ok); }
-  .pill.err { background: #3a1d1d; color: var(--bad); }
-  .bar { height: 8px; background: var(--bar); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
-  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+  h3, h4 { font-weight: 600; }
+  section > h3 { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+
+  /* cards: one hairline grid, numbered stages */
+  /* hairline grids: each cell has a 1px border pulled over its neighbour, so rows of any length stay clean */
+  .grid, .gallery, .cmp { padding: 1px 0 0 1px; }
+  .grid > *, .gallery > *, .cmp > * { min-width: 0; margin: -1px 0 0 -1px; border: 1px solid var(--line) !important; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 0; }
+  .card { background: var(--panel); border: 0; padding: 18px 18px 16px; }
+  section > .card, .form ~ .card, #compares .card { border: 1px solid var(--line); }
+  .card h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; letter-spacing: 0.01em; }
+  #stages { counter-reset: stage; }
+  #stages .card h3::before { counter-increment: stage; content: counter(stage, decimal-leading-zero); font: 500 11px var(--mono); color: var(--dim); margin-right: 4px; }
+  .pill { font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border: 1px solid var(--line2); color: var(--muted); background: transparent; }
+  .pill.run { color: var(--ok); border-color: var(--ok); }
+  .pill.err { color: var(--bad); border-color: var(--bad); }
+  .bar { height: 2px; background: var(--bar); overflow: hidden; margin: 14px 0 8px; }
+  .bar > i { display: block; height: 100%; background: var(--text); width: 0; transition: width .4s; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  button.act { background: var(--accent); color: #0b0d12; border: 0; border-radius: 6px; padding: 6px 12px; font-weight: 600; cursor: pointer; }
-  button.act.stop { background: var(--bad); color: #fff; }
-  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
-  details { margin-top: 8px; }
-  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-  .params { display: grid; grid-template-columns: 110px 1fr; gap: 6px 8px; margin-top: 8px; }
-  .params label { color: var(--muted); font-size: 12px; align-self: center; }
-  input[type=text], input[type=number], select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font: inherit; width: 100%; }
-  pre.log { background: #0a0c10; border: 1px solid var(--line); border-radius: 8px; padding: 12px; height: 60vh; overflow: auto; white-space: pre-wrap; font: 12px/1.4 Consolas, monospace; margin: 0; }
-  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
-  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
+
+  /* buttons */
+  button { font-family: var(--sans); }
+  button.act, button.ghost { font: 500 11px var(--sans); letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 14px; cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
+  button.act { background: var(--accent); color: var(--bg); border: 1px solid var(--accent); }
+  button.act:hover { background: #ffffff; border-color: #ffffff; }
+  button.act.stop { background: transparent; color: var(--bad); border-color: var(--bad); }
+  button.act.stop:hover { background: var(--bad); color: var(--bg); }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line2); }
+  button.ghost:hover { border-color: var(--text); }
+  button:disabled { opacity: .45; cursor: default; }
+
+  /* forms */
+  details { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; list-style: none; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "+"; font-family: var(--mono); display: inline-block; width: 14px; }
+  details[open] summary::before { content: "-"; }
+  .params { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; margin-top: 10px; }
+  .params label { color: var(--muted); font: 11px var(--mono); align-self: center; overflow: hidden; text-overflow: ellipsis; }
+  input[type=text], input[type=number], select, textarea { background: var(--bg); color: var(--text); border: 1px solid var(--line2); padding: 7px 9px; font: 12px var(--mono); width: 100%; outline: none; }
+  input[type=text]:focus, input[type=number]:focus, select:focus, textarea:focus { border-color: var(--text); }
+  input::placeholder, textarea::placeholder { color: var(--dim); }
+  select { appearance: none; -webkit-appearance: none; padding-right: 28px; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%237d7d7d'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; }
+  textarea { line-height: 1.5; resize: vertical; }
+  input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin: 0; border: 1px solid var(--line2); background: var(--bg); cursor: pointer; display: inline-grid; place-content: center; vertical-align: middle; }
+  input[type=checkbox]::after { content: ""; width: 8px; height: 8px; background: var(--text); transform: scale(0); transition: transform .1s; }
+  input[type=checkbox]:checked { border-color: var(--text); }
+  input[type=checkbox]:checked::after { transform: scale(1); }
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+  /* logs, gallery, chart */
+  pre.log { background: var(--panel); border: 1px solid var(--line); padding: 16px; height: 65vh; overflow: auto; white-space: pre-wrap; font: 12px/1.55 var(--mono); margin: 0; color: #cfcfcf; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0; }
+  .tile { background: var(--panel); overflow: hidden; cursor: pointer; position: relative; }
   .tile img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
-  .tile.ex { opacity: .35; outline: 2px solid var(--bad); }
+  .tile:hover { outline: 1px solid var(--text); outline-offset: -1px; z-index: 1; }
+  .tile.ex { opacity: .3; outline: 1px solid var(--bad); outline-offset: -1px; }
   body.blur .tile img, body.blur .modal img { filter: blur(18px); }
-  .tile .cap { font-size: 11px; padding: 6px 8px; color: var(--muted); max-height: 3.2em; overflow: hidden; }
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: none; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
+  .tile .cap { font-size: 11px; padding: 8px 10px; color: var(--muted); max-height: 3.6em; overflow: hidden; }
+  svg.chart { width: 100%; height: 220px; background: var(--panel); border: 1px solid var(--line); display: block; }
+
+  /* dataset modal */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; align-items: center; justify-content: center; z-index: 10; padding: 24px; }
   .modal.on { display: flex; }
-  .modal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; max-width: 1100px; width: 100%; max-height: 92vh; display: grid; grid-template-columns: minmax(0, 1fr) 380px; overflow: hidden; }
+  .modal .box { background: var(--panel); border: 1px solid var(--line); max-width: 1180px; width: 100%; max-height: 92vh; display: grid; grid-template-columns: minmax(0, 1fr) 380px; overflow: hidden; }
   .modal img { width: 100%; height: 92vh; max-height: 92vh; object-fit: contain; background: #000; }
-  .modal .side { padding: 14px; overflow: auto; max-height: 92vh; }
-  svg.chart { width: 100%; height: 220px; background: #0a0c10; border: 1px solid var(--line); border-radius: 8px; }
-  .previews img { width: 100%; border-radius: 6px; border: 1px solid var(--line); }
-  @media (max-width: 800px) { .modal .box { grid-template-columns: 1fr; } .modal img { height: 50vh; } }
+  .modal .side { padding: 18px; overflow: auto; max-height: 92vh; border-left: 1px solid var(--line); }
+  .modal h4 { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 20px 0 6px; }
+
+  /* previews and the full-size viewer */
+  .previews img { width: 100%; display: block; cursor: zoom-in; }
+  .pv { position: fixed; inset: 0; background: #000; display: none; flex-direction: column; z-index: 11; }
+  .pv.on { display: flex; }
+  .pv .bar2 { display: flex; gap: 8px; align-items: center; padding: 10px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: var(--bg); }
+  .pv .bar2 b { font: 500 12px var(--mono); }
+  .pv .view { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; }
+  .pv .view.fit { align-items: center; overflow: hidden; }
+  .pv .view.fit img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
+  .pv .view img { display: block; cursor: zoom-out; }
+  .pv .crop { overflow: hidden; flex: none; }
+  .pv .crop img { max-width: none; max-height: none; }
+  .pv button.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .pv > .muted { border-top: 1px solid var(--line); background: var(--bg); }
+
+  /* compare */
+  .cmp { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0; }
+  .cmp .pair { background: var(--panel2); padding: 10px; }
+  .cmp .pair img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; cursor: zoom-in; margin-top: 4px; }
+  .cmp .pair img:hover { outline: 1px solid var(--text); outline-offset: -1px; }
+  .cmp .pair .lbl { font: 11px var(--mono); color: var(--muted); margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* settings */
+  .form { display: grid; grid-template-columns: 210px 1fr; gap: 12px 20px; align-items: start; max-width: 1040px; }
+  .form > label { color: var(--text); font: 12px var(--mono); padding-top: 7px; }
+  .form .help { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .form h3 { grid-column: 1 / -1; margin: 26px 0 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .form h3:first-child { margin-top: 0; }
+  .checks { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 22px; align-items: center; }
+  @media (max-width: 800px) { .form { grid-template-columns: 1fr; } }
+  @media (max-width: 800px) { .modal .box { grid-template-columns: 1fr; } .modal img { height: 50vh; } header { overflow-x: auto; } header #where { display: none; } }
 </style>
 </head>
 <body class="blur">
@@ -60,6 +150,7 @@
     <button data-tab="dataset">Dataset</button>
     <button data-tab="training">Training</button>
     <button data-tab="logs">Logs</button>
+    <button data-tab="settings">Settings</button>
   </nav>
   <span class="muted" id="where"></span>
   <label class="muted"><input type="checkbox" id="blur" checked> blur images</label>
@@ -86,6 +177,26 @@
     <svg class="chart" id="chart" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg>
     <h3 style="margin:18px 0 8px">Previews</h3>
     <div class="grid previews" id="previews"></div>
+    <h3 style="margin:26px 0 8px">Compare base vs LoRA</h3>
+    <div class="card" style="max-width:1000px">
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Renders every prompt twice with the same seed: once with the base model, once with the LoRA. Any difference comes from the LoRA.</div>
+      <div class="params" style="grid-template-columns:110px 1fr">
+        <label>LoRA</label><select id="cmpLora"></select>
+        <label>prompts</label><div><textarea id="cmpPrompts" rows="6"></textarea><div class="muted" style="font-size:11px">one prompt per line; prompt N uses seed + N - 1</div></div>
+        <label>steps</label><input type="number" id="cmpSteps">
+        <label>cfg</label><input type="number" step="any" id="cmpCfg">
+        <label>seed</label><input type="number" id="cmpSeed">
+        <label>strength</label><input type="number" step="any" id="cmpStrength">
+      </div>
+      <div class="row" style="margin-top:10px"><button class="act" id="cmpGo">Run comparison</button><button class="ghost" id="cmpDefaults">Default prompts</button><span class="muted" id="cmpInfo" style="font-size:12px"></span></div>
+    </div>
+    <div id="compares" style="margin-top:14px"></div>
+  </section>
+
+  <section id="tab-settings" hidden>
+    <div class="checks" id="checks"></div>
+    <div class="form" id="form"></div>
+    <div class="row" style="margin:18px 0 40px"><button class="act" id="save">Save settings</button><button class="ghost" id="reset">Reset captioning to defaults</button><span class="muted" id="saved"></span></div>
   </section>
 
   <section id="tab-logs" hidden>
@@ -96,6 +207,18 @@
     <pre class="log" id="log"></pre>
   </section>
 </main>
+
+<div class="pv" id="pv">
+  <div class="bar2">
+    <button class="ghost" id="pvPrev">&larr;</button><b id="pvName"></b><button class="ghost" id="pvNext">&rarr;</button>
+    <span class="muted" style="margin-left:12px">show</span>
+    <span id="pvParts"></span>
+    <span class="muted" id="pvPrompt" style="font-size:12px;flex:1;min-width:200px"></span>
+    <button class="ghost" id="pvOpen">Open in new tab</button><button class="ghost" id="pvClose">Close</button>
+  </div>
+  <div class="view fit" id="pvView"></div>
+  <div class="muted" style="font-size:11px;padding:6px 14px">Click the image to switch between fit and full size. Left/right: previous or next preview, 1-3: one image, 0: all, Esc closes.</div>
+</div>
 
 <div class="modal" id="modal"><div class="box"><img id="mImg" alt=""><div class="side">
   <div class="row" style="justify-content:space-between"><span class="row"><button class="ghost" id="mPrev">&larr;</button><b id="mPos"></b><button class="ghost" id="mNext">&rarr;</button></span><button class="ghost" id="mClose">Close</button></div>
@@ -110,7 +233,7 @@
 const $ = s => document.querySelector(s);
 const api = (url, body) => fetch(url, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {}).then(r => r.json());
 const fmt = n => n == null ? "" : n.toLocaleString();
-let JOBS = {}, STATUS = null, tab = "pipeline";
+let JOBS = {}, PRESETS = {}, STATUS = null, tab = "pipeline";
 
 // ---- tabs
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
@@ -120,12 +243,18 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   if (tab === "dataset") loadDataset();
   if (tab === "training") loadRuns();
   if (tab === "logs") loadLog();
+  if (tab === "settings") loadSettings();
 });
 $("#blur").onchange = e => document.body.classList.toggle("blur", e.target.checked);
 
 // ---- pipeline
-const ORDER = ["fetch", "prep", "caption", "encode", "train", "merge"];
+const ORDER = ["models", "fetch", "prep", "caption", "encode", "train", "merge"];
+const CHECK_NAMES = {iris_repo: "Iris-3B code", iris_weights: "Iris-3B weights", text_encoder: "text encoder", captioner: "captioner", python: "Python"};
 function stageInfo(job, s) {
+  if (job === "models") {
+    const c = Object.entries(s.models), have = c.filter(x => x[1]).length;
+    return {pct: 100 * have / c.length, text: c.map(([k, v]) => `${CHECK_NAMES[k] || k} ${v ? "ok" : "missing"}`).join(" · ")};
+  }
   if (job === "fetch") return {pct: s.fetch.pct, text: `${fmt(s.fetch.images)} images kept · tars ${s.fetch.tars.map(t => t.done ? "done" : t.pct + "%").join(" / ")}`};
   if (job === "prep") return {pct: s.prep.images ? Math.min(100, 100 * s.prep.manifest / s.prep.images) : 0, text: `${fmt(s.prep.manifest)} in manifest of ${fmt(s.prep.images)} images`};
   if (job === "caption") return {pct: s.caption.pct, text: `${fmt(s.caption.done)} / ${fmt(s.caption.total)} captioned` + (s.caption.s_per_item ? ` · ${s.caption.s_per_item} s/image · ${s.caption.eta_h} h left` : "")};
@@ -144,16 +273,33 @@ function renderStages(s) {
       <div class="muted" style="font-size:12px">${JOBS[j].desc}</div>
       <div class="bar"><i id="b-${j}"></i></div>
       <div class="muted" id="t-${j}" style="font-size:12px;min-height:18px"></div>
-      <div class="row" style="margin-top:8px"><button class="act" id="go-${j}">Start</button><button class="ghost" data-log="${j}">Log</button></div>
-      <details><summary>Settings</summary><div class="params" id="f-${j}">${Object.entries(JOBS[j].params).map(([k, v]) =>
+      <div class="row" style="margin-top:8px"><button class="act" id="go-${j}">Start</button>${j === "train" ? '<button class="ghost" id="pause-train" hidden>Pause</button>' : ""}<button class="ghost" data-log="${j}">Log</button></div>
+      ${j === "train" ? `<div class="row" style="margin-top:10px"><select id="preset"><option value="">Preset...</option>${Object.keys(PRESETS).map(k => `<option>${k}</option>`).join("")}</select></div><div class="muted" id="presetNote" style="font-size:11px;margin-top:4px"></div>` : ""}
+      <details${j === "train" ? " open" : ""}><summary>Settings</summary><div class="params" id="f-${j}">${Object.entries(JOBS[j].params).map(([k, v]) =>
         `<label>${k}</label>` + (typeof v === "boolean" ? `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>` : `<input type="${typeof v === "number" ? "number" : "text"}" step="any" data-k="${k}" value="${v}">`)).join("")}</div></details>
     </div>`).join("");
+  const preset = $("#preset");
+  if (preset && !preset.onchange) preset.onchange = () => {
+    const p = PRESETS[preset.value];
+    if (!p) return;
+    Object.entries(p.params).forEach(([k, v]) => { const i = $(`#f-train [data-k="${k}"]`); if (i) i.value = v; });
+    $("#presetNote").textContent = p.note;
+  };
   ORDER.forEach(j => {
     const info = stageInfo(j, s), running = !!s.running[j], last = s.finished[j];
     $("#b-" + j).style.width = (info.pct ?? 0) + "%";
     $("#t-" + j).textContent = info.text;
     const pill = $("#p-" + j);
-    pill.textContent = running ? "running" : last ? (last.exit === 0 ? "finished" : last.exit === -1 ? "stopped" : "failed") : "idle";
+    pill.textContent = running ? (j === "train" && s.train_pausing ? "pausing" : "running")
+      : j === "train" && s.train_paused ? "paused" : last ? (last.exit === 0 ? "finished" : last.exit === -1 ? "stopped" : "failed") : "idle";
+    if (j === "train") {
+      const pb = $("#pause-train");
+      pb.hidden = !running;
+      pb.disabled = !!s.train_pausing;
+      pb.textContent = s.train_pausing ? "Pausing..." : "Pause";
+      pb.title = "Saves at the end of the current step and stops. Start again (resume on) to continue.";
+      pb.onclick = async () => { const r = await api("/api/jobs/pause", {job: "train"}); if (!r.ok) alert(r.error); refresh(); };
+    }
     pill.className = "pill" + (running ? " run" : last && last.exit > 0 ? " err" : "");
     const go = $("#go-" + j);
     go.textContent = running ? "Stop" : "Start";
@@ -264,17 +410,207 @@ function drawRun(quiet) {
     const px = x => 10 + 980 * (x - x0) / Math.max(1, x1 - x0), py = y => 210 - 200 * (y - y0) / Math.max(1e-9, y1 - y0);
     const raw = h.map(p => `${px(p[0]).toFixed(1)},${py(Math.min(Math.max(p[1], y0), y1)).toFixed(1)}`).join(" ");
     const avg = h.map(p => `${px(p[0]).toFixed(1)},${py(p[2]).toFixed(1)}`).join(" ");
-    svg.innerHTML = `<polyline points="${raw}" fill="none" stroke="#3a4560" stroke-width="1"/><polyline points="${avg}" fill="none" stroke="#7c9cff" stroke-width="2.5"/>
-      <text x="14" y="18" fill="#9aa3b2" font-size="12">loss (avg) ${y1.toFixed(4)}</text><text x="14" y="206" fill="#9aa3b2" font-size="12">${y0.toFixed(4)}</text>`;
-  } else svg.innerHTML = `<text x="20" y="110" fill="#9aa3b2" font-size="14">no loss data yet</text>`;
-  if (!quiet || !$("#previews").children.length)
-    $("#previews").innerHTML = r.previews.slice().reverse().map(p => `<div class="card"><div class="muted" style="font-size:12px;margin-bottom:6px">${p}</div><img loading="lazy" src="/preview?run=${encodeURIComponent(r.name)}&file=${encodeURIComponent(p)}"></div>`).join("") || '<p class="muted">Previews appear every few hundred steps.</p>';
+    svg.innerHTML = `<polyline points="${raw}" fill="none" stroke="#2e2e2e" stroke-width="1"/><polyline points="${avg}" fill="none" stroke="#ececec" stroke-width="1.5"/>
+      <text x="14" y="18" fill="#7d7d7d" font-size="11" font-family="JetBrains Mono, Consolas, monospace">loss (avg) ${y1.toFixed(4)}</text><text x="14" y="206" fill="#7d7d7d" font-size="11" font-family="JetBrains Mono, Consolas, monospace">${y0.toFixed(4)}</text>`;
+  } else svg.innerHTML = `<text x="20" y="110" fill="#7d7d7d" font-size="12" font-family="JetBrains Mono, Consolas, monospace">no loss data yet</text>`;
+  const box = $("#previews"), key = r.name + ":" + r.previews.length;
+  if (!quiet || box.dataset.key !== key) {  // redraw when a new preview lands
+    box.dataset.key = key;
+    PV_LISTS.previews = r.previews.slice().reverse().map(p => ({name: p, src: `/preview?run=${encodeURIComponent(r.name)}&file=${encodeURIComponent(p)}`}));
+    PV_LISTS.prompts = r.preview_prompts || [];
+    box.innerHTML = PV_LISTS.previews.map((x, i) => `<div class="card"><div class="muted" style="font-size:12px;margin-bottom:6px">${x.name}</div><img loading="lazy" data-pv="${i}" src="${x.src}"></div>`).join("") || '<p class="muted">Previews appear every few hundred steps.</p>';
+    box.querySelectorAll("[data-pv]").forEach(im => im.onclick = () => { PV.prompts = PV_LISTS.prompts; openPv(PV_LISTS.previews, Number(im.dataset.pv)); });
+  }
+  drawCompare(r);
 }
+
+// ---- compare base vs LoRA
+let CMP_RUN = null;
+function drawCompare(r) {
+  const loraSel = $("#cmpLora"), cur = loraSel.value;
+  const paths = r.loras.map(l => `${STATUS.data}\\runs\\${r.name}\\${l}`);
+  if (loraSel.dataset.key !== paths.join("|")) {
+    loraSel.dataset.key = paths.join("|");
+    loraSel.innerHTML = paths.map((x, i) => `<option value="${esc(x)}">${r.loras[i]}</option>`).join("") || "<option value=''>no LoRA saved yet</option>";
+    loraSel.value = paths.includes(cur) ? cur : (paths[paths.length - 1] || "");
+  }
+  if (!$("#cmpPrompts").dataset.init) {
+    const d = JOBS.compare.params;
+    $("#cmpPrompts").value = d.prompts; $("#cmpSteps").value = d.steps; $("#cmpCfg").value = d.cfg;
+    $("#cmpSeed").value = d.seed; $("#cmpStrength").value = d.strength;
+    $("#cmpPrompts").dataset.init = "1";
+  }
+  const running = STATUS.running.compare, last = STATUS.finished.compare;
+  $("#cmpGo").textContent = running ? "Stop" : "Run comparison";
+  $("#cmpGo").className = "act" + (running ? " stop" : "");
+  $("#cmpInfo").textContent = running ? "rendering... (Logs tab: compare)" : last && last.exit > 0 ? "the last comparison failed, see Logs: compare" : "";
+  const box = $("#compares"), key = r.name + ":" + (r.compares || []).map(c => c.dir + c.pairs.flat().filter(Boolean).length).join(",");
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  CMP_RUN = r;
+  box.innerHTML = (r.compares || []).map((c, ci) => {
+    const m = c.meta || {}, lora = (m.lora || "").split(/[\\/]/).pop();
+    return `<div class="card" style="margin-bottom:12px"><div class="muted" style="font-size:12px;margin-bottom:8px"><b style="color:var(--text)">${esc(lora || c.dir)}</b> · ${m.steps || "?"} steps · cfg ${m.cfg ?? "?"} · strength ${m.strength ?? "?"} · ${esc(c.dir)}</div>
+      <div class="cmp">${c.pairs.map((pair, i) => `<div class="pair"><div class="lbl" title="${esc(m.prompts?.[i]?.prompt || "")}">${i + 1}. ${esc((m.prompts?.[i]?.prompt || "").slice(0, 70))}</div>
+        ${pair.map((f, k) => f ? `<div class="lbl">${k ? "LoRA" : "base"}</div><img loading="lazy" data-c="${ci}" data-i="${i * 2 + k}" src="/preview?run=${encodeURIComponent(r.name)}&dir=${encodeURIComponent(c.dir)}&file=${f}">` : `<div class="lbl">${k ? "LoRA" : "base"}: not rendered yet</div>`).join("")}</div>`).join("")}</div></div>`;
+  }).join("") || '<p class="muted">No comparisons for this run yet.</p>';
+  box.querySelectorAll("img[data-c]").forEach(im => im.onclick = () => openCompare(Number(im.dataset.c), Number(im.dataset.i)));
+}
+function openCompare(ci, idx) {
+  const c = CMP_RUN.compares[ci], m = c.meta || {}, list = [];
+  c.pairs.forEach((pair, i) => pair.forEach((f, k) => { if (f) list.push({
+    name: `${k ? "LoRA" : "base"} ${i + 1}`, slot: i * 2 + k,
+    src: `/preview?run=${encodeURIComponent(CMP_RUN.name)}&dir=${encodeURIComponent(c.dir)}&file=${f}`,
+    caption: `seed ${m.prompts?.[i]?.seed ?? "?"} · ${m.prompts?.[i]?.prompt || ""}`}); }));
+  PV.prompts = [];
+  openPv(list, Math.max(0, list.findIndex(x => x.slot === idx)));
+}
+$("#cmpGo").onclick = async () => {
+  if (STATUS.running.compare) { await api("/api/jobs/stop", {job: "compare"}); return refresh(); }
+  const params = {lora: $("#cmpLora").value, prompts: $("#cmpPrompts").value, steps: Number($("#cmpSteps").value),
+    cfg: Number($("#cmpCfg").value), seed: Number($("#cmpSeed").value), strength: Number($("#cmpStrength").value)};
+  const r = await api("/api/jobs/start", {job: "compare", params});
+  if (!r.ok) alert(r.error);
+  refresh();
+};
+$("#cmpDefaults").onclick = () => { $("#cmpPrompts").value = JOBS.compare.params.prompts; };
+
+// ---- preview viewer: a preview is one sheet of N square images side by side
+const PV = {list: [], prompts: [], i: 0, part: 0, full: false}, PV_LISTS = {};
+function openPv(list, i) { PV.list = list; PV.i = i; PV.part = 0; PV.full = false; drawPv(); $("#pv").classList.add("on"); }
+function drawPv() {
+  const x = PV.list[PV.i];
+  if (!x) return;
+  const img = new Image();
+  img.src = x.src;
+  img.onload = () => {
+    const n = Math.max(1, Math.round(img.naturalWidth / img.naturalHeight));
+    $("#pvName").textContent = `${x.name}  (${PV.i + 1} / ${PV.list.length})`;
+    $("#pvParts").innerHTML = [`<button class="ghost ${PV.part === 0 ? "on" : ""}" data-part="0">all</button>`]
+      .concat(Array.from({length: n}, (_, k) => `<button class="ghost ${PV.part === k + 1 ? "on" : ""}" data-part="${k + 1}">${k + 1}</button>`)).join(" ");
+    $("#pvParts").querySelectorAll("[data-part]").forEach(b => b.onclick = () => { PV.part = Number(b.dataset.part); drawPv(); });
+    $("#pvPrompt").textContent = PV.part ? (PV.prompts[PV.part - 1] || "") : (x.caption || "");
+    const view = $("#pvView");
+    view.className = "view" + (PV.full ? "" : " fit");
+    view.innerHTML = "";
+    if (PV.part === 0) {
+      view.appendChild(img);
+    } else {
+      // one square of the sheet: fit to the window, or at its real size
+      const side = img.naturalHeight, room = Math.min(view.clientWidth - 20, view.clientHeight - 20);
+      const size = PV.full ? side : Math.min(side, room), scale = size / side;
+      const crop = document.createElement("div");
+      crop.className = "crop";
+      crop.style.width = crop.style.height = size + "px";
+      img.style.width = img.naturalWidth * scale + "px";
+      img.style.height = size + "px";
+      img.style.marginLeft = -(PV.part - 1) * size + "px";
+      img.style.cursor = PV.full ? "zoom-out" : "zoom-in";
+      crop.appendChild(img);
+      view.style.alignItems = PV.full ? "flex-start" : "center";
+      view.appendChild(crop);
+    }
+    img.onclick = () => { PV.full = !PV.full; drawPv(); };
+  };
+}
+const closePv = () => $("#pv").classList.remove("on");
+$("#pvClose").onclick = closePv;
+$("#pvPrev").onclick = () => { if (PV.i > 0) { PV.i--; drawPv(); } };
+$("#pvNext").onclick = () => { if (PV.i < PV.list.length - 1) { PV.i++; drawPv(); } };
+$("#pvOpen").onclick = () => window.open(PV.list[PV.i].src, "_blank");
+document.addEventListener("keydown", e => {
+  if (!$("#pv").classList.contains("on")) return;
+  if (e.key === "Escape") closePv();
+  else if (e.key === "ArrowLeft") $("#pvPrev").click();
+  else if (e.key === "ArrowRight") $("#pvNext").click();
+  else if (/^[0-9]$/.test(e.key) && $(`#pvParts [data-part="${e.key}"]`)) { PV.part = Number(e.key); drawPv(); }
+});
+
+// ---- settings
+const FORM = [
+  ["Paths and setup", null, [
+    ["data_dir", "text", "Data folder: images, work files, runs and logs. Restart the dashboard after changing it."],
+    ["python", "text", "Python that runs the jobs (needs PyTorch). Empty: the one running this dashboard."],
+    ["iris_repo", "text", "Clone of github.com/speridlabs/iris-3b. Empty: ./iris-3b or ../iris-3b."],
+    ["models_dir", "text", "Models folder, ComfyUI layout (diffusion_models, text_encoders). ComfyUI's own models folder works."],
+    ["extra_path", "lines", "Folders put in front of PATH for jobs, one per line (for example ROCm tools)."],
+    ["env", "env", "Extra environment variables for jobs, KEY=value per line."],
+    ["port", "number", "Dashboard port. Restart the dashboard after changing it."]]],
+  ["Captioning", "caption", [
+    ["captioner", "text", "Qwen3-VL folder that writes the captions. Empty: the abliterated one if the Models job downloaded it, else Iris's text encoder (refuses more)."],
+    ["mode", "select:vlm,tags", "vlm writes captions, tags uses the image's tags as the caption."],
+    ["prompt", "area", "What the captioner is asked. {tags} becomes the image's tags."],
+    ["tags_as_hints", "bool", "Show the image's tags to the captioner."],
+    ["append_tags", "bool", "Put the tags after the caption, so both styles of prompting work."],
+    ["max_tags", "number", "Most tags used per image."],
+    ["skip_tags", "list", "Tags never used (comma or line separated)."],
+    ["drop_words", "list", "Captions containing any of these words are dropped (comma or line separated)."],
+    ["remove_phrases", "lines", "Cut out of every caption, one per line, for example: The image shows"],
+    ["rewrite_girl_boy", "bool", "Write girl/boy in the prose as woman/man. Tags like 1girl always stay as they are."],
+    ["prefix", "text", "Text in front of every caption, for example a trigger word."],
+    ["max_side", "number", "Image size the captioner sees. Bigger reads details better but is slower."],
+    ["max_new_tokens", "number", "Longest caption, in tokens."],
+    ["temperature", "number", "Variety in wording. 0 is the same style every time, 0.7 is a good mix, above 1 gets odd."],
+    ["top_p", "number", ""],
+    ["repetition_penalty", "number", "Above 1 discourages repeating words."]]],
+];
+let SET = null;
+const esc = v => String(v ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+async function loadSettings() {
+  SET = await api("/api/settings");
+  $("#checks").innerHTML = Object.entries(SET.checks).map(([k, v]) => `<span class="pill ${v ? "run" : "err"}">${CHECK_NAMES[k] || k}: ${v ? "ok" : "missing"}</span>`).join("")
+    + (Object.values(SET.checks).every(Boolean) ? "" : `<span class="muted" style="font-size:12px">Missing pieces: run start.bat again, or the Models job on the Pipeline tab.</span>`)
+    + `<span class="muted" style="font-size:12px;margin-left:auto">${esc(SET.file)}</span>`;
+  const html = [];
+  for (const [title, sect, fields] of FORM) {
+    html.push(`<h3>${title}</h3>`);
+    for (const [k, type, help] of fields) {
+      const v = sect ? SET.settings[sect][k] : SET.settings[k], ph = sect ? (k === "captioner" ? SET.resolved.captioner : "") : SET.resolved[k] || "";
+      const id = `s-${sect || "root"}-${k}`, d = `data-s="${sect || ""}" data-k="${k}" data-t="${type}" id="${id}"`;
+      let input;
+      if (type === "bool") input = `<input type="checkbox" ${d} ${v ? "checked" : ""}>`;
+      else if (type === "number") input = `<input type="number" step="any" ${d} value="${esc(v)}">`;
+      else if (type.startsWith("select:")) input = `<select ${d}>${type.slice(7).split(",").map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
+      else if (type === "area") input = `<textarea rows="7" ${d}>${esc(v)}</textarea>`;
+      else if (type === "lines") input = `<textarea rows="3" ${d}>${esc((v || []).join("\n"))}</textarea>`;
+      else if (type === "list") input = `<textarea rows="3" ${d}>${esc((v || []).join(", "))}</textarea>`;
+      else if (type === "env") input = `<textarea rows="3" ${d}>${esc(Object.entries(v || {}).map(([a, b]) => a + "=" + b).join("\n"))}</textarea>`;
+      else input = `<input type="text" ${d} value="${esc(v)}" placeholder="${esc(ph)}">`;
+      html.push(`<label for="${id}">${k}</label><div>${input}${help ? `<div class="help">${help}</div>` : ""}</div>`);
+    }
+    if (sect === "caption") html.push(`<div></div><div class="help">The built-in minors filter in safety.py always runs on top of these settings.</div>`);
+  }
+  $("#form").innerHTML = html.join("");
+}
+function readForm() {
+  const out = {caption: {}};
+  document.querySelectorAll("#form [data-k]").forEach(el => {
+    const t = el.dataset.t, raw = el.value;
+    let v = t === "bool" ? el.checked : t === "number" ? Number(raw) : raw;
+    if (t === "lines") v = raw.split("\n").map(x => x.trim()).filter(Boolean);
+    if (t === "list") v = raw.split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
+    if (t === "env") v = Object.fromEntries(raw.split("\n").map(x => x.trim()).filter(x => x.includes("="))
+      .map(x => [x.slice(0, x.indexOf("=")).trim(), x.slice(x.indexOf("=") + 1).trim()]));
+    (el.dataset.s ? out[el.dataset.s] : out)[el.dataset.k] = v;
+  });
+  return out;
+}
+$("#save").onclick = async () => {
+  const r = await api("/api/settings", readForm());
+  $("#saved").textContent = r.ok ? "Saved. Jobs started from now on use these." : (r.error || "could not save");
+  if (r.ok) loadSettings();
+};
+$("#reset").onclick = async () => {
+  if (!confirm("Put every captioning setting back to its default?")) return;
+  const r = await api("/api/settings", {caption: SET.defaults.caption});
+  $("#saved").textContent = r.ok ? "Captioning settings reset." : r.error;
+  loadSettings();
+};
 
 // ---- boot
 (async () => {
-  JOBS = await api("/api/jobs");
-  $("#logJob").innerHTML = ["pipeline", ...ORDER].map(j => `<option>${j}</option>`).join("");
+  [JOBS, PRESETS] = await Promise.all([api("/api/jobs"), api("/api/presets")]);
+  $("#logJob").innerHTML = ["pipeline", ...ORDER, "compare"].map(j => `<option>${j}</option>`).join("");
   await refresh();
   setInterval(refresh, 4000);
 })();

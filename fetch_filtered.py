@@ -1,7 +1,7 @@
 """Stream danbooru tar batches from a Hugging Face dataset and keep only allowed images.
 
     python fetch_filtered.py --repo https://huggingface.co/datasets/AbdullahRian/Uncensored_Anime_Images ^
-        --meta-file metadata/posts.json --out D:\\Iris-data\\images --min-score 30
+        --meta-file metadata/posts.json --out data\\images --min-score 30
 
 The dataset needs .tar files of images named <md5>.<ext> or <post id>.<ext> and a
 danbooru posts metadata file (JSON lines or a JSON array) somewhere in the repo.

@@ -200,6 +200,7 @@ def main():
     ap.add_argument("--flip", action="store_true", help="random horizontal flips (avoid if images contain text)")
     ap.add_argument("--save-every", type=int, default=500)
     ap.add_argument("--preview-every", type=int, default=500)
+    ap.add_argument("--preview-steps", type=int, default=40, help="sampling steps for the preview images")
     ap.add_argument("--checkpointing", default="full", choices=["none", "full", "selective_op", "selective_layer"])
     ap.add_argument("--resume", action="store_true", help="continue from <out>/state.pt")
     ap.add_argument("--init-lora", default=None,
@@ -264,8 +265,11 @@ def main():
     skip = set()
     if args.exclude and Path(args.exclude).exists():
         skip = {l.strip() for l in Path(args.exclude).read_text(encoding="utf-8").splitlines() if l.strip()}
-    batches = Batches(rows, args.batch, skip)
-    print(f"{len(rows) - len(skip & {r['path'] for r in rows})} images to train on ({len(skip)} excluded)")
+    # captions written after the last text cache run have no embedding yet, leave them out
+    unencoded = {r["path"] for i, r in enumerate(rows) if i not in cache.index}
+    batches = Batches(rows, args.batch, skip | unencoded)
+    used = len(rows) - len((skip | unencoded) & {r["path"] for r in rows})
+    print(f"{used} images to train on ({len(skip)} excluded, {len(unencoded)} not in the text cache yet)")
     meta = {"rank": str(args.rank), "alpha": str(alpha), "extra": json.dumps(
         {"base": "speridlabs/iris-3b", "targets": args.targets, "kind": "iris3b-lora"})}
 
@@ -277,6 +281,10 @@ def main():
     log = open(out / "log.csv", "a", encoding="utf-8")
     loss_ema, t0, t_last = None, time.time(), time.time()
     torch.cuda.reset_peak_memory_stats()
+    pause = out / "PAUSE"  # the dashboard's Pause button creates it: save now and stop, --resume continues
+    pause.unlink(missing_ok=True)
+    if step == 0 and args.preview_every:  # what the model makes before any training, to compare against
+        preview(model, cfg, cache, device, out / "preview_000000.png", steps=args.preview_steps)
     while step < args.steps:
         for g in opt.param_groups:
             g["lr"] = lr_at(step)
@@ -308,7 +316,13 @@ def main():
         if step % args.save_every == 0 or step == args.steps:
             save(f"{step:06d}")
         if args.preview_every and (step % args.preview_every == 0 or step == args.steps):
-            preview(model, cfg, cache, device, out / f"preview_{step:06d}.png")
+            preview(model, cfg, cache, device, out / f"preview_{step:06d}.png", steps=args.preview_steps)
+        if pause.exists():
+            log.flush()
+            save(f"{step:06d}")
+            pause.unlink(missing_ok=True)
+            print(f"paused at step {step}, saved; start with resume on to continue", flush=True)
+            return
     print(f"finished {step} steps in {(time.time() - t0) / 3600:.2f} h -> {out}")
 
 

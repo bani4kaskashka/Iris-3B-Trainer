@@ -1,6 +1,7 @@
 """Local dashboard for the Iris LoRA pipeline: progress, jobs, logs and a dataset browser.
 
-    python dashboard.py                      # http://127.0.0.1:7861, data in D:\\Iris-data
+    start.bat                                # first run sets everything up, then opens the page
+    python dashboard.py --open               # http://127.0.0.1:7861, data folder from settings.json
     python dashboard.py --data E:\\iris --port 7862
 
 Everything the page does goes through a small JSON API, so scripts (or an agent)
@@ -13,6 +14,10 @@ can drive it too:
     GET  /api/dataset?offset=0&limit=60&q=text
     POST /api/exclude     {"path": "...", "excluded": true}
     GET  /api/runs        training runs with loss history and previews
+    POST /api/jobs/pause  training saves at the end of its current step and stops
+    GET  /api/settings    settings.json, what empty fields resolve to, and missing pieces
+    POST /api/settings    {"caption": {"drop_words": [...]}, ...}  (merged into settings.json)
+    GET  /api/presets     training presets
 It binds to 127.0.0.1 only. One GPU job runs at a time. Jobs run detached: closing
 or restarting the dashboard never stops them, and a new dashboard picks them up.
 """
@@ -30,8 +35,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import settings
+
 HERE = Path(__file__).resolve().parent
-GPU_JOBS = {"caption", "encode", "train", "merge"}
+GPU_JOBS = {"caption", "encode", "train", "merge", "compare"}
 # starts a job with no parent attached (and outside the caller's job object when allowed),
 # prints its pid and exits, so nothing that kills the dashboard's process tree reaches the job
 LAUNCHER = r"""
@@ -50,8 +57,20 @@ print(p.pid, flush=True)
 """
 
 
-def comfy_scripts() -> str:
-    return str(Path(os.environ["LOCALAPPDATA"]) / "Comfy-Desktop" / "ComfyUI-Installs" / "ComfyUI" / "ComfyUI" / ".venv" / "Scripts")
+def job_python() -> str:
+    py = settings.load()["python"]
+    return py if py and Path(py).exists() else sys.executable
+
+
+def job_env() -> dict:
+    s = settings.load()
+    py = Path(job_python())
+    # the job Python's own folders first (venvs keep tools like hipInfo.exe in Scripts)
+    path = [str(x) for x in s["extra_path"] if str(x).strip()] + [str(py.parent), str(py.parent / "Scripts")]
+    return {**os.environ, "PYTHONWARNINGS": "ignore", "PYTHONIOENCODING": "utf-8",
+            "PATH": os.pathsep.join(path + [os.environ.get("PATH", "")]),
+            "IRIS_MODELS": str(settings.models_dir(s)), "IRIS_REPO": str(settings.iris_repo(s)),
+            "IRIS_SETTINGS": str(settings.FILE), **{k: str(v) for k, v in s["env"].items()}}
 
 
 class Paths:
@@ -62,7 +81,6 @@ class Paths:
         self.runs = data / "runs"
         self.logs = data / "logs"
         self.thumbs = data / "thumbs"
-        self.vlm = data / "models" / "Huihui-Qwen3-VL-4B-Instruct-abliterated"
         self.manifest = self.work / "manifest.jsonl"
         self.captions = self.work / "captioned.jsonl"
         self.cache = self.work / "text_cache"
@@ -74,36 +92,77 @@ class Paths:
 def job_defs(P: Paths) -> dict:
     """name -> (description, default params). Params map to script flags in build_cmd()."""
     return {
+        "models": ("Models: download Iris-3B and its text encoder into the models folder (skips what you have). "
+                   "captioner also gets the abliterated Qwen3-VL, which refuses far less",
+                   {"captioner": True}),
         "fetch": ("Download: stream the filtered images from a Hugging Face dataset (any danbooru-style tar dataset)",
                   {"repo": "https://huggingface.co/datasets/AbdullahRian/Uncensored_Anime_Images",
                    "meta_file": "metadata/posts.json", "out": str(P.images), "min_score": 30, "tars": "all"}),
-        "prep": ("Prep: tags, minors filter, size check, duplicates, buckets",
-                 {"images": str(P.images), "out": str(P.manifest), "min_side": 832, "scale": 1.0}),
-        "caption": ("Captions: natural-language captions with the VLM, plus tags (resumable)",
-                    {"manifest": str(P.manifest), "out": str(P.captions), "vlm": str(P.vlm), "max_side": 768}),
+        "prep": ("Prep: tags (sidecars or booru file names), minors filter, size check, duplicates, buckets. "
+                 "Several image folders: separate them with ;",
+                 {"images": str(P.images), "out": str(P.manifest), "min_side": 832, "scale": 1.0, "require_tags": False}),
+        "caption": ("Captions: natural-language captions with the VLM, plus tags (resumable). "
+                    "Prompt, words and sampling are in the Settings tab",
+                    {"manifest": str(P.manifest), "out": str(P.captions)}),
         "encode": ("Text cache: run Iris's text encoder over every caption",
                    {"captions": str(P.captions), "cache": str(P.cache)}),
         "train": ("Train the LoRA (resume continues a run; init_lora starts from a finished LoRA)",
-                  {"name": "anime", "steps": 10000, "rank": 128, "lr": 0.00008, "batch": 1, "accum": 1,
-                   "save_every": 500, "preview_every": 500, "resume": True, "init_lora": ""}),
+                  {"name": "my-lora", **PRESETS["Balanced"], "batch": 1, "accum": 1, "resume": True, "init_lora": ""}),
         "merge": ("Merge a LoRA into a full checkpoint for ComfyUI",
-                  {"lora": "", "name": "anime", "strength": 1.0}),
+                  {"lora": "", "name": "my-lora", "strength": 1.0}),
+        "compare": ("Compare: the same prompts and seeds with the base model and with a LoRA (Training tab)",
+                    {"lora": "", "prompts": "\n".join(COMPARE_PROMPTS), "steps": 50, "cfg": 3.0, "seed": 100,
+                     "strength": 1.0}),
     }
 
 
+# Compare defaults: two booru-tag prompts, one plain sentence, one mix of both
+COMPARE_PROMPTS = [
+    "1girl, solo, mature female, long hair, black hair, large breasts, nude, nipples, navel, lying, on bed, "
+    "looking at viewer, blush, smile, bedroom, window, sunlight",
+    "1girl, 1boy, hetero, sex, vaginal, missionary, mature female, brown hair, medium breasts, nude, sweat, "
+    "open mouth, blush, on bed, pov",
+    "anime illustration. A tall adult woman with wavy red hair and green eyes, wearing a black lace lingerie set, "
+    "sits on the edge of a velvet sofa in a dim lounge, warm lamplight, confident smile, looking at the viewer.",
+    "anime illustration of a muscular adult woman with short white hair and a scar over one eye, topless, leaning "
+    "against a stone wall in a rainy alley at night, neon reflections. 1girl, mature female, abs, topless, wet, "
+    "night, rain, neon lights, looking at viewer",
+]
+
+
+# training presets (the Train card's preset menu fills these in). VRAM is the peak measured
+# on a 16 GB card at 832x1216; leave a couple of GB free for the desktop and browser.
+PRESETS = {
+    "Quick test": {"steps": 1500, "rank": 32, "lr": 0.0001, "save_every": 250, "preview_every": 250},
+    "Character or style": {"steps": 3000, "rank": 32, "lr": 0.0001, "save_every": 500, "preview_every": 500},
+    "Balanced": {"steps": 8000, "rank": 64, "lr": 0.0001, "save_every": 500, "preview_every": 500},
+    "Big dataset": {"steps": 20000, "rank": 64, "lr": 0.00008, "save_every": 1000, "preview_every": 1000},
+    "High capacity": {"steps": 12000, "rank": 128, "lr": 0.00008, "save_every": 1000, "preview_every": 1000},
+    "Keep training a LoRA": {"steps": 4000, "rank": 64, "lr": 0.00005, "save_every": 500, "preview_every": 500},
+}
+PRESET_NOTES = {
+    "Quick test": "a short run to check the data and captions, about 1.5 h",
+    "Character or style": "a few hundred to a few thousand images of one thing",
+    "Balanced": "rank 64, about 9.4 GB VRAM and 4.3 s/step",
+    "Big dataset": "10k+ images, teaching new concepts; about a day",
+    "High capacity": "rank 128 needs about 15 GB VRAM: close games, browsers and anything else on the GPU",
+    "Keep training a LoRA": "set init_lora to a finished LoRA of the same rank; new images or more steps",
+}
+
+
 def build_cmd(job: str, p: dict, P: Paths) -> list[str]:
-    py = str(HERE.parent / "iris-3b" / ".venv" / "Scripts" / "python.exe")
-    if not Path(py).exists():
-        py = sys.executable
+    py = job_python()
+    if job == "models":
+        return [py, "-u", "download_models.py"] + (["--captioner"] if p.get("captioner") else [])
     if job == "fetch":
         return [py, "-u", "fetch_filtered.py", "--repo", p["repo"], "--meta-file", p["meta_file"], "--out", p["out"],
                 "--min-score", str(p["min_score"]), "--tars", str(p["tars"])]
     if job == "prep":
-        return [py, "-u", "prep_dataset.py", "--images", p["images"], "--out", p["out"], "--require-tags",
-                "--min-side", str(p["min_side"]), "--scale", str(p["scale"])]
+        folders = [f.strip() for f in str(p["images"]).split(";") if f.strip()]
+        return [py, "-u", "prep_dataset.py", "--images", *folders, "--out", p["out"], "--min-side", str(p["min_side"]),
+                "--scale", str(p["scale"])] + (["--require-tags"] if p.get("require_tags") else [])
     if job == "caption":
-        return [py, "-u", "caption.py", "--manifest", p["manifest"], "--out", p["out"], "--vlm", p["vlm"],
-                "--max-side", str(p["max_side"])]
+        return [py, "-u", "caption.py", "--manifest", p["manifest"], "--out", p["out"]]
     if job == "encode":
         return [py, "-u", "encode_text.py", "--captions", p["captions"], "--cache", p["cache"]]
     if job == "train":
@@ -119,6 +178,14 @@ def build_cmd(job: str, p: dict, P: Paths) -> list[str]:
         return cmd + (["--resume"] if p.get("resume") else [])
     if job == "merge":
         return [py, "-u", "merge_lora.py", p["lora"], "--name", p["name"], "--strength", str(p["strength"])]
+    if job == "compare":
+        if not p["lora"]:
+            raise ValueError("pick a LoRA to compare")
+        prompts = p["prompts"] if isinstance(p["prompts"], list) else str(p["prompts"]).splitlines()
+        file = P.work / "compare_prompts.txt"
+        file.write_text("\n".join(x.strip() for x in prompts if x.strip()) + "\n", encoding="utf-8")
+        return [py, "-u", "compare_lora.py", p["lora"], "--prompts", str(file), "--steps", str(p["steps"]),
+                "--cfg", str(p["cfg"]), "--seed", str(p["seed"]), "--strength", str(p["strength"])]
     raise ValueError(f"unknown job {job}")
 
 
@@ -179,9 +246,7 @@ class Jobs:
                 return {"ok": False, "error": f"the GPU is busy with {', '.join(busy)}; stop it first"}
             p = {**job_defs(self.P)[job][1], **(params or {})}
             cmd = build_cmd(job, p, self.P)
-            env = {**os.environ, "PYTHONWARNINGS": "ignore", "PYTHONIOENCODING": "utf-8",
-                   "PATH": comfy_scripts() + os.pathsep + os.environ.get("PATH", ""),
-                   "IRIS_MODELS": os.environ.get("IRIS_MODELS", r"E:\ComfyUI\models")}
+            env = job_env()
             log = self.P.logs / f"{job}.log"
             with open(log, "a", encoding="utf-8") as f:
                 f.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} start {job}: {' '.join(cmd)}\n")
@@ -193,6 +258,14 @@ class Jobs:
             self.meta[job] = {"since": time.time(), "params": p}
             self.save()
             return {"ok": True, "pid": self.procs[job].pid}
+
+    def pause(self) -> dict:
+        """Ask the running training to save at the end of its current step and stop."""
+        run = self.running().get("train")
+        if not run:
+            return {"ok": False, "error": "training is not running"}
+        (self.P.runs / run["params"]["name"] / "PAUSE").write_text("")
+        return {"ok": True}
 
     def stop(self, job: str) -> dict:
         proc = self.procs.get(job)
@@ -265,6 +338,7 @@ def fetch_state(P: Paths) -> dict:
 
 def status(P: Paths, jobs: Jobs) -> dict:
     s = {"data": str(P.data), "running": jobs.running(), "finished": jobs.last(), "time": time.time()}
+    s["models"] = settings_view(P)["checks"]
     s["fetch"] = fetch_state(P)
     images, manifest = image_count(P), line_count(P.manifest)
     s["prep"] = {"manifest": manifest, "images": images}
@@ -272,9 +346,15 @@ def status(P: Paths, jobs: Jobs) -> dict:
     s["caption"] = {"done": caps, "total": manifest, "pct": round(100 * caps / manifest, 1) if manifest else 0,
                     **rate_from_log(tail(P.logs / "caption.log", 30))}
     enc = line_count(P.cache / "index.jsonl")
+    if "encode" in s["running"]:  # index.jsonl is complete only at the end, the log has the live count
+        live = re.findall(r"(\d+)/\d+ (?:already )?encoded", tail(P.logs / "encode.log", 5))
+        enc = int(live[-1]) if live else 0
     s["encode"] = {"done": enc, "total": caps, "pct": round(100 * enc / caps, 1) if caps else 0,
                    "shards": len(list(P.cache.glob("shard_*.safetensors"))) if P.cache.exists() else 0}
     s["excluded"] = line_count(P.excluded, ttl=0)
+    last_train = tail(P.logs / "train.log", 4)
+    s["train_paused"] = "train" not in s["running"] and "paused at step" in last_train
+    s["train_pausing"] = "train" in s["running"] and (P.runs / s["running"]["train"]["params"]["name"] / "PAUSE").exists()
     s["train"] = [run_summary(r) for r in sorted(P.runs.iterdir()) if r.is_dir()] if P.runs.exists() else []
     return s
 
@@ -294,10 +374,32 @@ def run_summary(run: Path, history: bool = False) -> dict:
            "loras": sorted(p.name for p in run.glob("lora_*.safetensors")),
            "previews": sorted(p.name for p in run.glob("preview_*.png"))}
     if history:
+        out["compares"] = [compare_summary(d) for d in sorted(run.glob("compare_*"), key=lambda d: d.stat().st_mtime,
+                                                                 reverse=True) if d.is_dir()]
+    if history:
         stride = max(1, len(rows) // 1500)
         out["history"] = rows[::stride]
         out["config"] = cfg
     return out
+
+
+def preview_prompts(P: Paths) -> list[str]:
+    """The prompts behind the preview sheets, as stored in the text cache."""
+    extra = P.cache / "extra.safetensors"
+    if not extra.exists():
+        return []
+    from safetensors import safe_open
+
+    with safe_open(str(extra), framework="numpy") as f:
+        return json.loads((f.metadata() or {}).get("previews", "[]"))
+
+
+def compare_summary(d: Path) -> dict:
+    meta = json.loads((d / "meta.json").read_text(encoding="utf-8")) if (d / "meta.json").exists() else {}
+    n = len(list(d.glob("base_*.png")))
+    return {"dir": d.name, "meta": meta, "pairs": [[f"base_{i}.png" if (d / f"base_{i}.png").exists() else None,
+                                                   f"lora_{i}.png" if (d / f"lora_{i}.png").exists() else None]
+                                                  for i in range(1, n + 1)]}
 
 
 # ---------- dataset ----------
@@ -378,6 +480,22 @@ def thumbnail(P: Paths, path: str) -> Path | None:
     return th
 
 
+# ---------- settings ----------
+
+def settings_view(P: Paths) -> dict:
+    """The saved settings plus what each empty one resolves to right now."""
+    s = settings.load()
+    repo, models, cap = settings.iris_repo(s), settings.models_dir(s), settings.captioner(s)
+    return {"settings": s, "file": str(settings.FILE), "defaults": settings.DEFAULTS, "resolved": {
+        "data_dir": str(P.data), "python": job_python(), "iris_repo": str(repo), "models_dir": str(models),
+        "captioner": str(cap)}, "checks": {
+        "iris_repo": (repo / "src" / "iris3b").is_dir(),
+        "iris_weights": (models / "diffusion_models" / "iris-3b.safetensors").exists(),
+        "text_encoder": (models / "text_encoders" / "Qwen3-VL-4B-Instruct" / "config.json").exists(),
+        "captioner": (cap / "config.json").exists(),
+        "python": Path(job_python()).exists()}}
+
+
 # ---------- http ----------
 
 def make_handler(P: Paths, jobs: Jobs):
@@ -413,6 +531,10 @@ def make_handler(P: Paths, jobs: Jobs):
                     return self.send(200, status(P, jobs))
                 if u.path == "/api/jobs":
                     return self.send(200, {k: {"desc": d, "params": p, "gpu": k in GPU_JOBS} for k, (d, p) in job_defs(P).items()})
+                if u.path == "/api/presets":
+                    return self.send(200, {k: {"params": v, "note": PRESET_NOTES.get(k, "")} for k, v in PRESETS.items()})
+                if u.path == "/api/settings":
+                    return self.send(200, settings_view(P))
                 if u.path == "/api/log":
                     name = re.sub(r"[^a-z]", "", q.get("job", ""))
                     return self.send(200, {"text": tail(P.logs / f"{name}.log", int(q.get("lines", 200)))})
@@ -420,13 +542,17 @@ def make_handler(P: Paths, jobs: Jobs):
                     return self.send(200, dataset(P, int(q.get("offset", 0)), int(q.get("limit", 60)), q.get("q", ""),
                                                   q.get("excluded") == "1"))
                 if u.path == "/api/runs":
-                    return self.send(200, [run_summary(r, history=True) for r in sorted(P.runs.iterdir()) if r.is_dir()])
+                    prompts = preview_prompts(P)
+                    return self.send(200, [{**run_summary(r, history=True), "preview_prompts": prompts}
+                                           for r in sorted(P.runs.iterdir()) if r.is_dir()])
                 if u.path == "/thumb":
                     return self.file(thumbnail(P, q.get("path", "")))
                 if u.path == "/image":
                     return self.file(allowed_file(P, q.get("path", "")))
                 if u.path == "/preview":
                     run = P.runs / re.sub(r"[\\/:]", "", q.get("run", ""))
+                    if q.get("dir"):  # a compare folder inside the run
+                        run = run / re.sub(r"[\\/:]|\.\.", "", q["dir"])
                     return self.file(run / re.sub(r"[\\/:]", "", q.get("file", "")))
                 return self.send(404, {"error": "not found"})
             except Exception as exc:  # keep the dashboard alive
@@ -440,8 +566,13 @@ def make_handler(P: Paths, jobs: Jobs):
                     if b.get("job") not in job_defs(P):
                         return self.send(400, {"ok": False, "error": "unknown job"})
                     return self.send(200, jobs.start(b["job"], b.get("params") or {}))
+                if u.path == "/api/jobs/pause":
+                    return self.send(200, jobs.pause())
                 if u.path == "/api/jobs/stop":
                     return self.send(200, jobs.stop(b.get("job", "")))
+                if u.path == "/api/settings":
+                    settings.save(b)
+                    return self.send(200, {"ok": True, **settings_view(P)})
                 if u.path == "/api/exclude":
                     return self.send(200, set_excluded(P, b["path"], bool(b.get("excluded", True))))
                 return self.send(404, {"error": "not found"})
@@ -453,12 +584,19 @@ def make_handler(P: Paths, jobs: Jobs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data", default=os.environ.get("IRIS_DATA", r"D:\Iris-data"))
-    ap.add_argument("--port", type=int, default=7861)
+    ap.add_argument("--data", default=None, help="data folder (default: data_dir in settings.json, else ./data)")
+    ap.add_argument("--port", type=int, default=None, help="default: port in settings.json, else 7861")
+    ap.add_argument("--open", action="store_true", help="open the page in the browser")
     args = ap.parse_args()
-    P = Paths(Path(args.data))
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(P, Jobs(P)))
-    print(f"Iris dashboard on http://127.0.0.1:{args.port}  (data: {P.data})", flush=True)
+    P = Paths(Path(args.data) if args.data else settings.data_dir())
+    port = args.port or int(settings.load()["port"])
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(P, Jobs(P)))
+    url = f"http://127.0.0.1:{port}"
+    print(f"Iris dashboard on {url}  (data: {P.data}, settings: {settings.FILE})", flush=True)
+    if args.open:
+        import webbrowser
+
+        threading.Timer(1.0, webbrowser.open, [url]).start()
     server.serve_forever()
 
 

@@ -134,6 +134,10 @@ def tags_blocked(tags) -> str | None:
     return None
 
 
+# names that contain a blocked word without meaning it (the series tag lands in the caption)
+CAPTION_NAMES = re.compile(r"teenage[\s_]+mutant[\s_]+ninja[\s_]+turtles", re.I)
+
+
 def caption_blocked(text: str) -> str | None:
-    m = CAPTION_BLOCK.search(text or "")
+    m = CAPTION_BLOCK.search(CAPTION_NAMES.sub("tmnt", text or ""))
     return f"caption word '{m.group(0)}'" if m else None

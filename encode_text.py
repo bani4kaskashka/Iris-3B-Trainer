@@ -20,6 +20,8 @@ from common import TEXT_ENCODER, load_base_config, read_jsonl
 PREVIEW_PROMPTS = [
     "anime illustration. A woman with long silver hair and red eyes in a black dress, standing in a moonlit garden.",
     "anime illustration. A smiling woman with short brown hair in a white summer dress at the beach, bright sunlight.",
+    "anime illustration. A nude adult woman with long black hair and large breasts lying on her back on white bed "
+    "sheets, blushing, soft window light. 1girl, nude, nipples, lying, on bed, mature female",
 ]
 
 
@@ -43,6 +45,14 @@ def trimmed(encoding):
     return out
 
 
+def write_index(cache: Path, index):
+    tmp = cache / "index.jsonl.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in index:
+            f.write(json.dumps(r) + "\n")
+    tmp.replace(cache / "index.jsonl")
+
+
 @torch.no_grad()
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -62,10 +72,19 @@ def main():
     save_file({k: trimmed(v)[0] for k, v in extra.items()}, str(cache / "extra.safetensors"),
               metadata={"previews": json.dumps(PREVIEW_PROMPTS)})
 
+    # captioned.jsonl only grows at the end, so full shards from an earlier run are still valid
+    old = {}
+    if (cache / "index.jsonl").exists():
+        for r in read_jsonl(cache / "index.jsonl"):
+            old.setdefault(r["shard"], []).append(r)
     index = []
     for start in range(0, len(rows), args.shard):
         chunk = rows[start:start + args.shard]
         shard = f"shard_{start // args.shard:05d}.safetensors"
+        if len(chunk) == args.shard and len(old.get(shard, [])) == args.shard and (cache / shard).exists():
+            index += old[shard]
+            print(f"{start + args.shard}/{len(rows)} already encoded ({shard})", flush=True)
+            continue
         tensors = {}
         for b in range(0, len(chunk), args.batch):
             batch = chunk[b:b + args.batch]
@@ -74,10 +93,9 @@ def main():
                 tensors[key] = emb
                 index.append({"sample": start + b + j, "shard": shard, "key": key, "tokens": emb.shape[0]})
         save_file(tensors, str(cache / shard))
+        write_index(cache, index)  # after every shard, so a crash keeps the finished ones
         print(f"{min(start + args.shard, len(rows))}/{len(rows)} encoded -> {shard}", flush=True)
-    with open(cache / "index.jsonl", "w", encoding="utf-8") as f:
-        for r in index:
-            f.write(json.dumps(r) + "\n")
+    write_index(cache, index)
     toks = [r["tokens"] for r in index]
     print(f"done: {len(index)} captions, {sum(toks) / max(len(toks), 1):.0f} tokens on average, longest {max(toks, default=0)}")
 
